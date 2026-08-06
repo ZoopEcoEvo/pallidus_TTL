@@ -1,0 +1,72 @@
+---
+title: "Project Analysis Plan"
+author: AUTHOR NAME
+date: last-modified
+date-format: "YYYY-MM-DD"
+language: 
+  title-block-published: "Updated"
+toc: true
+format:
+  html:
+    anchor-sections: false
+    other-links:
+      - text: Project Repo
+        href: https://github.com/ZoopEcoEvo
+---
+
+## Project Description
+
+This document should be used to outline the analysis plan for a project. It is most useful for this to be completed in full before a project is officially started, but may benefit from information obtained during preliminary trials.
+
+## Questions, Objectives, Hypotheses
+
+This section should list all of the questions and objectives for the project. Remember to keep them SMART:
+
+-   Specific
+
+-   Measurable
+
+-   Assignable (who's going to do the work?)
+
+-   Realistic
+
+-   Time-bounded
+
+It is also helpful to number the questions / objectives.
+
+## Variable Descriptions
+
+| Variable Name              | Variable Description                  | Response or Explanatory?     | Relevant Question or Objective                                            | Data Type                                  | Units                        | Expected Range                | How are zeros and missing data recorded?     |
+|---------|---------|---------|---------|---------|---------|---------|---------|
+| Short but descriptive name | Thorough description of the variable  | AKA dependent or independent | Which of the stated research questions or objectives is this related to?  | Numeric, categorical, ordinal factor, etc. | Units values are recorded in | If known - can be approximate | Important - no empty cells in the data files |
+
+## Study Design
+
+This section should provide a detailed description of the study design. In addition to protocols and methodological details, this section should include a detailed accounting of replication and sample sizes.
+
+Consider including a schematic or diagram. This could be an embedded image, or an encoded diagram (e.g. Quarto includes native support for [mermaid diagrams](https://quarto.org/docs/authoring/diagrams.html#overview)).
+
+
+## Statistics
+
+### Data Processing 
+
+You may need to 'clean' the data after collection. This section should describe (and explain the utility of) any planned transformations, filtering, etc.
+
+### Key Summary Statistics
+
+This section will typically be short. What are the main summary statistics of interest (e.g. mean and standard error, coefficient of variation, etc.), and for which groups will you calculate these values?
+
+### Statistical Tests of Hypotheses
+
+The main statistics section will outline the statistical analyses planned and how they will be interpreted to test the stated hypotheses. This includes tests of assumptions, how model fit will be evaluated, any post-hoc tests that could be needed, etc. This section should also include a brief description of any non-standard analyses, and any caveats or expected places where caution will be warranted when interpreting or extrapolating the results. Throughout this section, it is critical that the analyses described are clearly linked to the questions and hypotheses proposed above.
+
+This section should also describe how missing values will be handled. If planned analyses are robust to missing values, state that in this section - it can be helpful to have a reminder of this after data is collected.
+
+### Alternative Approaches
+
+This section should outline potential alternative approaches that could be needed (e.g. when assumptions of planned analyses are not met).
+
+## Key Figures
+
+This section is relatively speculative. It can, however, be helpful to have a section where you outline the expected tables and figures that might be important to display based on the planned questions, analyses, hypotheses, etc.
