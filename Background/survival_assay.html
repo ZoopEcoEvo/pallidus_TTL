@@ -196,6 +196,51 @@
   }
   .field-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; margin-bottom: 14px; }
   .field-grid .field.full{ grid-column: 1 / -1; }
+  .flag-icon{
+    position:absolute; top:1px; left:1px; font-size:18px; line-height:1;
+    color: rgba(255,255,255,0.6); cursor:pointer;
+    padding: 2px 3px;
+  }
+  .flag-icon:hover{ color:#fff; }
+  .flag-icon.flagged{ color:#ffd23f; text-shadow: 0 0 2px rgba(0,0,0,0.6); }
+  .well.empty .flag-icon{ display:none; }
+  .alarm-controls{
+    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+    padding: 10px 18px; border-bottom: 1px solid var(--line);
+  }
+  .inline-label{
+    font-size: 11px; text-transform:uppercase; letter-spacing:0.06em;
+    color: var(--ink-soft); font-weight:600;
+  }
+  .alarm-controls input[type=text]{ min-width: 90px; width: 90px; padding: 6px 8px; font-family: var(--mono); }
+  .alarm-chips{ display:flex; gap:6px; flex-wrap:wrap; }
+  .chip{
+    display:inline-flex; align-items:center; gap:4px;
+    font-family: var(--mono); font-size: 11px;
+    background: #eef1ef; border: 1px solid var(--line-strong); border-radius: 12px;
+    padding: 3px 8px 3px 10px; color: var(--ink);
+  }
+  .chip.triggered{ background:#e8f2ea; border-color: var(--good); color: var(--good); }
+  .chip-x{
+    background:none; border:none; cursor:pointer; color: var(--ink-soft);
+    font-family: var(--mono); font-size: 13px; line-height:1; padding:0;
+  }
+  .chip-x:hover{ color: var(--bad); }
+  .alarm-banner{
+    display:none; align-items:center; justify-content:space-between; gap:10px;
+    padding: 10px 18px; background:#fdf3e0; border-bottom: 1px solid #e8c976;
+    font-size: 13px; font-weight:600;
+  }
+  .alarm-banner.active{ display:flex; }
+  .alarm-dismiss{
+    background:none; border: 1px solid var(--ink-soft); border-radius:3px;
+    padding: 4px 10px; font-size:11px; cursor:pointer; color: var(--ink);
+  }
+  @keyframes alarmFlash{
+    0%, 100% { box-shadow: none; }
+    50% { box-shadow: 0 0 0 4px rgba(232,185,58,0.65); }
+  }
+  .bath-card.alarm-flash{ animation: alarmFlash 0.6s ease-in-out 3; }
   footer{
     margin-top: 26px; font-size: 11px; color: var(--ink-soft); text-align:center;
   }
@@ -214,13 +259,13 @@
       <label for="observer">Observer</label>
       <input type="text" id="observer" placeholder="Initials or name" oninput="meta.observer=this.value">
     </div>
-    <button class="btn export" onclick="exportCSV()">Export CSV</button>
+    <button class="btn export" onclick="exportAllCSV()">Export All (CSV)</button>
   </div>
 </header>
 
 <main class="baths" id="bathsRoot"></main>
 
-<footer>Data stays in this browser tab only — nothing is uploaded. Export CSV to save your work.</footer>
+<footer>Data stays in this browser tab only — nothing is uploaded. Export CSV (per plate or all) to save your work.</footer>
 
 <script>
 // ---------- state ----------
@@ -235,10 +280,14 @@ function newBath(index){
     readTemp: '',
     populations: [{ name:'', count:'' }],
     wells: new Array(20).fill(null),
+    flags: new Array(20).fill(false),
     assigned: false,
     activeTab: 'setup',
     timer: { running:false, startTs:null, elapsedMs:0, firstStartTime:null },
-    timepoints: [] // {minute, label, data:{wellIndex:boolean}}
+    timepoints: [], // {minute, label, data:{wellIndex:boolean}}
+    alarms: [], // {id, minutes, triggered}
+    pendingAlerts: [],
+    alarmSoundInterval: null
   };
 }
 const baths = [newBath(0), newBath(1), newBath(2)];
@@ -343,6 +392,7 @@ function assignWells(i){
   const wells = new Array(20).fill(null);
   individuals.forEach((name, idx)=>{ wells[slots[idx]] = { population: name }; });
   bath.wells = wells;
+  bath.flags = new Array(20).fill(false);
   bath.assigned = true;
   bath.activeTab = 'plate';
   renderApp();
@@ -359,6 +409,111 @@ function removeTimepoint(i, tpIdx){
     if(activeIdx > tpIdx) bath.activeTab = `tp-${activeIdx-1}`;
   }
   renderApp();
+}
+function toggleFlag(i, w){
+  baths[i].flags[w] = !baths[i].flags[w];
+  const cell = document.getElementById(`well-${i}-${w}`);
+  if(cell){
+    const iconEl = cell.querySelector('.flag-icon');
+    if(iconEl) iconEl.classList.toggle('flagged', baths[i].flags[w]);
+  }
+}
+
+// ---------- alarms ----------
+function parseAlarmTime(str){
+  const parts = str.trim().split(':').map(p=>p.trim());
+  if(parts.length===0 || parts.some(p=>p==='' || isNaN(Number(p)))) return NaN;
+  let h=0, m=0, s=0;
+  if(parts.length===3){ [h,m,s] = parts.map(Number); }
+  else if(parts.length===2){ [h,m] = parts.map(Number); }
+  else if(parts.length===1){ [m] = parts.map(Number); }
+  else return NaN;
+  return h*60 + m + s/60;
+}
+function renderAlarmChips(i){
+  const bath = baths[i];
+  if(bath.alarms.length===0) return '';
+  return bath.alarms.map(a=>`<span class="chip${a.triggered?' triggered':''}">${formatElapsed(a.minutes*60000)}<button class="chip-x" onclick="removeAlarm(${i},'${a.id}')" title="Remove alarm">&times;</button></span>`).join('');
+}
+function addAlarm(i){
+  const inp = document.getElementById(`alarm-input-${i}`);
+  const val = parseAlarmTime(inp.value);
+  if(isNaN(val) || val<0){ alert('Enter a valid alarm time as hh:mm:ss (e.g. 0:05:00), mm:ss, or minutes.'); return; }
+  baths[i].alarms.push({ id: 'a'+Date.now()+Math.random().toString(36).slice(2,6), minutes: val, triggered:false });
+  baths[i].alarms.sort((a,b)=>a.minutes-b.minutes);
+  inp.value = '';
+  const chipsEl = document.getElementById(`alarm-chips-${i}`);
+  if(chipsEl) chipsEl.innerHTML = renderAlarmChips(i);
+}
+function removeAlarm(i, id){
+  baths[i].alarms = baths[i].alarms.filter(a=>a.id!==id);
+  const chipsEl = document.getElementById(`alarm-chips-${i}`);
+  if(chipsEl) chipsEl.innerHTML = renderAlarmChips(i);
+}
+function playBeep(delay){
+  setTimeout(()=>{
+    try{
+      const ctx = new (window.AudioContext||window.webkitAudioContext)();
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.frequency.value = 880;
+      g.gain.value = 0.15;
+      o.start();
+      setTimeout(()=>{ o.stop(); ctx.close(); }, 350);
+    }catch(e){}
+  }, delay);
+}
+function playAlarmSound(){
+  playBeep(0); playBeep(450); playBeep(900);
+}
+function renderAlarmBanner(i){
+  const bath = baths[i];
+  const banner = document.getElementById(`alarm-banner-${i}`);
+  if(!banner) return;
+  if(bath.pendingAlerts.length===0){
+    banner.classList.remove('active');
+    banner.innerHTML = '';
+    return;
+  }
+  banner.classList.add('active');
+  banner.innerHTML = `<span>⏰ ${bath.pendingAlerts.join(' • ')}</span><button class="alarm-dismiss" onclick="dismissAlarmBanner(${i})">Dismiss</button>`;
+}
+function dismissAlarmBanner(i){
+  baths[i].pendingAlerts = [];
+  if(baths[i].alarmSoundInterval){
+    clearInterval(baths[i].alarmSoundInterval);
+    baths[i].alarmSoundInterval = null;
+  }
+  renderAlarmBanner(i);
+  const card = document.getElementById(`card-${i}`);
+  if(card) card.classList.remove('alarm-flash');
+}
+function checkAlarms(i){
+  const bath = baths[i];
+  const elapsedMin = getElapsedMs(bath)/60000;
+  let fired = false;
+  bath.alarms.forEach(a=>{
+    if(!a.triggered && elapsedMin >= a.minutes){
+      a.triggered = true;
+      bath.pendingAlerts.push(`Alarm at ${formatElapsed(a.minutes*60000)}`);
+      fired = true;
+    }
+  });
+  if(fired){
+    renderAlarmBanner(i);
+    const chipsEl = document.getElementById(`alarm-chips-${i}`);
+    if(chipsEl) chipsEl.innerHTML = renderAlarmChips(i);
+    const card = document.getElementById(`card-${i}`);
+    if(card){
+      card.classList.add('alarm-flash');
+      setTimeout(()=>card.classList.remove('alarm-flash'), 3000);
+    }
+    if(!bath.alarmSoundInterval){
+      playAlarmSound();
+      bath.alarmSoundInterval = setInterval(()=>playAlarmSound(), 4000);
+    }
+  }
 }
 
 function switchTab(i, tab){
@@ -381,7 +536,18 @@ function resetTimer(i){
   if(!confirm('Reset the stopwatch for this water bath? This does not delete existing timepoint tabs.')) return;
   const t = baths[i].timer;
   t.running = false; t.startTs = null; t.elapsedMs = 0; t.firstStartTime = null;
+  baths[i].alarms.forEach(a=>a.triggered=false);
+  baths[i].pendingAlerts = [];
+  if(baths[i].alarmSoundInterval){
+    clearInterval(baths[i].alarmSoundInterval);
+    baths[i].alarmSoundInterval = null;
+  }
   renderTimerControls(i);
+  renderAlarmBanner(i);
+  const chipsEl = document.getElementById(`alarm-chips-${i}`);
+  if(chipsEl) chipsEl.innerHTML = renderAlarmChips(i);
+  const card = document.getElementById(`card-${i}`);
+  if(card) card.classList.remove('alarm-flash');
 }
 function addTimepoint(i){
   const bath = baths[i];
@@ -405,7 +571,12 @@ function toggleWell(i, tpIdx, wellIdx){
 
 // ---------- timer ticking ----------
 setInterval(()=>{
-  baths.forEach((b, i)=>{ if(b.timer.running) renderTimerControls(i, true); });
+  baths.forEach((b, i)=>{
+    if(b.timer.running){
+      renderTimerControls(i, true);
+      checkAlarms(i);
+    }
+  });
 }, 500);
 
 function renderTimerControls(i, tickOnly){
@@ -442,7 +613,7 @@ function renderPlate(i, tpIdx){
     return `<div class="empty-note">No individuals assigned to wells yet. Fill out Setup and click "Assign Individuals to Wells".</div>`;
   }
   const popsUsed = [...new Set(bath.wells.filter(w=>w).map(w=>w.population))];
-  html += `<div class="legend">${popsUsed.map(name=>`<span class="legend-item"><span class="legend-swatch" style="background:${popColor(bath,name)}"></span>${name}</span>`).join('')}</div>`;
+  html += `<div class="legend">${popsUsed.map(name=>`<span class="legend-item"><span class="legend-swatch" style="background:${popColor(bath,name)}"></span>${name}</span>`).join('')}<span class="legend-item">⚑ flag a well</span></div>`;
   html += `<div class="plate">`;
   for(let w=0; w<20; w++){
     const well = bath.wells[w];
@@ -455,6 +626,7 @@ function renderPlate(i, tpIdx){
       const clickAttr = interactive ? ` onclick="toggleWell(${i},${tpIdx},${w})"` : '';
       const interactiveClass = interactive ? ' interactive' : '';
       html += `<div class="well${deadClass}${interactiveClass}" id="well-${i}-${w}" style="background:${color}"${clickAttr}>
+        <span class="flag-icon${bath.flags[w] ? ' flagged':''}" onclick="event.stopPropagation(); toggleFlag(${i},${w})" title="Flag this well">⚑</span>
         <span class="wl">${wellLabel(w)}</span><span class="pn">${well.population}</span>
       </div>`;
     }
@@ -526,13 +698,21 @@ function renderBathCard(i){
     <div class="bath-card" id="card-${i}" style="border-top-color:${tempToColor(bath.setTemp)}">
       <div class="bath-head">
         <div class="label">Water Bath ${i+1}${bath.id ? ' — ' + bath.id : ''}</div>
+        <button class="btn secondary small" onclick="exportBathCSV(${i})">Export CSV</button>
       </div>
+      <div class="alarm-banner" id="alarm-banner-${i}"></div>
       <div class="timer-block">
         <span class="timer-display" id="timer-disp-${i}">${formatElapsed(getElapsedMs(bath))}</span>
         <span class="start-time" id="start-time-${i}">${bath.timer.firstStartTime ? 'Started ' + bath.timer.firstStartTime.toLocaleTimeString() : ''}</span>
         <button class="btn secondary small" id="timer-btn-${i}" onclick="toggleTimer(${i})">${bath.timer.running?'Pause':(bath.timer.elapsedMs>0?'Resume':'Start')}</button>
         <button class="btn secondary small" onclick="resetTimer(${i})">Reset</button>
         <button class="btn secondary small" onclick="addTimepoint(${i})">+ Add Timepoint Tab</button>
+      </div>
+      <div class="alarm-controls">
+        <label class="inline-label">Alarm at</label>
+        <input type="text" id="alarm-input-${i}" placeholder="hh:mm:ss">
+        <button class="btn secondary small" onclick="addAlarm(${i})">+ Add Alarm</button>
+        <div class="alarm-chips" id="alarm-chips-${i}">${renderAlarmChips(i)}</div>
       </div>
       <div class="tabs">${renderTabs(i)}</div>
       <div class="tab-content">${renderTabContent(i)}</div>
@@ -543,40 +723,66 @@ function renderBathCard(i){
 function renderApp(){
   const root = document.getElementById('bathsRoot');
   root.innerHTML = baths.map((b,i)=>renderBathCard(i)).join('');
-  baths.forEach((b,i)=>{ validateAssign(i); renderTimerControls(i); });
+  baths.forEach((b,i)=>{ validateAssign(i); renderTimerControls(i); renderAlarmBanner(i); });
 }
 renderApp();
 
 // ---------- export ----------
-function exportCSV(){
-  const headers = ['experiment_date','observer','water_bath_id','set_temp_c','read_temp_c','stopwatch_start_time','timepoint_min','well_id','population','responding','sex','stage','length'];
-  const rows = [headers];
-  baths.forEach(bath=>{
-    bath.timepoints.forEach(tp=>{
-      for(let w=0; w<20; w++){
-        if(!bath.wells[w]) continue;
-        rows.push([
-          meta.date, meta.observer, bath.id, bath.setTemp, bath.readTemp,
-          bath.timer.firstStartTime ? bath.timer.firstStartTime.toISOString() : '',
-          tp.minute, wellLabel(w), bath.wells[w].population,
-          tp.data[w] ? 'yes':'no', '', '', ''
-        ]);
-      }
-    });
+const CSV_HEADERS = ['experiment_date','observer','water_bath_id','set_temp_c','read_temp_c','stopwatch_start_time','timepoint_min','well_id','population','responding','flagged','sex','stage','length'];
+
+function buildBathRows(bath){
+  const rows = [];
+  bath.timepoints.forEach(tp=>{
+    for(let w=0; w<20; w++){
+      if(!bath.wells[w]) continue;
+      rows.push([
+        meta.date, meta.observer, bath.id, bath.setTemp, bath.readTemp,
+        bath.timer.firstStartTime ? bath.timer.firstStartTime.toISOString() : '',
+        tp.minute, wellLabel(w), bath.wells[w].population,
+        tp.data[w] ? 'yes':'no',
+        bath.flags[w] ? 'yes':'no',
+        '', '', ''
+      ]);
+    }
   });
-  if(rows.length===1){ alert('No timepoint data recorded yet. Add at least one timepoint before exporting.'); return; }
-  const csv = rows.map(r=>r.map(csvEscape).join(',')).join('\n');
+  return rows;
+}
+function bathFileName(bath){
+  const datePart = meta.date || new Date().toISOString().slice(0,10);
+  const tempPart = (bath.setTemp !== '' && bath.setTemp !== null && !isNaN(parseFloat(bath.setTemp))) ? `${bath.setTemp}C` : 'NA';
+  const idPart = (bath.id ? bath.id : `bath${bath.index+1}`).replace(/[^a-zA-Z0-9_-]+/g,'_');
+  return `survival_assay_${datePart}_${tempPart}_${idPart}.csv`;
+}
+function downloadCSV(filename, rows){
+  const csv = [CSV_HEADERS, ...rows].map(r=>r.map(csvEscape).join(',')).join('\n');
   const blob = new Blob([csv], { type:'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  const datePart = meta.date || new Date().toISOString().slice(0,10);
   a.href = url;
-  a.download = `survival_assay_${datePart}.csv`;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+function exportBathCSV(i){
+  const bath = baths[i];
+  const rows = buildBathRows(bath);
+  if(rows.length===0){ alert('No timepoint data recorded yet for this water bath.'); return; }
+  downloadCSV(bathFileName(bath), rows);
+}
+function exportAllCSV(){
+  let any = false;
+  baths.forEach(bath=>{
+    const rows = buildBathRows(bath);
+    if(rows.length>0){
+      downloadCSV(bathFileName(bath), rows);
+      any = true;
+    }
+  });
+  if(!any) alert('No timepoint data recorded yet. Add at least one timepoint before exporting.');
+}
+
 </script>
 </body>
 </html>
