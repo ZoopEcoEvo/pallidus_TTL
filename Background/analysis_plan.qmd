@@ -36,9 +36,9 @@ It is also helpful to number the questions / objectives.
 
 ## Variable Descriptions
 
-| Variable Name              | Variable Description                  | Response or Explanatory?     | Relevant Question or Objective                                            | Data Type                                  | Units                        | Expected Range                | How are zeros and missing data recorded?     |
-|---------|---------|---------|---------|---------|---------|---------|---------|
-| Short but descriptive name | Thorough description of the variable  | AKA dependent or independent | Which of the stated research questions or objectives is this related to?  | Numeric, categorical, ordinal factor, etc. | Units values are recorded in | If known - can be approximate | Important - no empty cells in the data files |
+| Variable Name | Variable Description | Response or Explanatory? | Relevant Question or Objective | Data Type | Units | Expected Range | How are zeros and missing data recorded? |
+|----|----|----|----|----|----|----|----|
+| Short but descriptive name | Thorough description of the variable | AKA dependent or independent | Which of the stated research questions or objectives is this related to? | Numeric, categorical, ordinal factor, etc. | Units values are recorded in | If known - can be approximate | Important - no empty cells in the data files |
 
 ## Study Design
 
@@ -46,10 +46,9 @@ This section should provide a detailed description of the study design. In addit
 
 Consider including a schematic or diagram. This could be an embedded image, or an encoded diagram (e.g. Quarto includes native support for [mermaid diagrams](https://quarto.org/docs/authoring/diagrams.html#overview)).
 
-
 ## Statistics
 
-### Data Processing 
+### Data Processing
 
 You may need to 'clean' the data after collection. This section should describe (and explain the utility of) any planned transformations, filtering, etc.
 
