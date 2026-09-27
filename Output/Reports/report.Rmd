@@ -83,6 +83,8 @@ theme_matt_facets = function(base_size = 18,
 }
 ```
 
+When setting up the experiments, there is often a slight offset between the temperature observed in the wells and the set temperature of the water bath. For these analyses, we will use the temperature read from the water bath, not the set temperature. 
+
 ```{r}
 
 raw_data |> 
@@ -95,18 +97,21 @@ raw_data |>
 
 ```
 
+The number of observations at each temperature for each population is shown below. 
+
 ```{r}
 
 raw_data |> group_by(source_file) |> 
-  count(read_temp_c) |> 
+  count(population, read_temp_c) |> 
   ggplot(aes(x = read_temp_c, y = n)) + 
+  facet_wrap(population~.) + 
   geom_bar(stat = "identity")
 
 ```
 
 ## Building the survival dataset
 
-`responding == "no"` indicates death. Rows flagged for data-quality issues (`flagged == "yes"`) are excluded before constructing one time-to-event record per individual: the death time is the first timepoint at which an individual is recorded as not responding, or, if it never stops responding, the last observed timepoint (right-censored). The actual measured bath temperature (`read_temp_c`) is used as the temperature covariate rather than the nominal `set_temp_c`, since the two diverge noticeably at higher target temperatures.
+Individuals are checked for survival at regular intervals during the experiments. In the resulting data, `responding == "no"` indicates death: the death time is the first timepoint at which an individual is recorded as not responding, or, if it never stops responding, the last observed timepoint (right-censored). Rows flagged for data-quality issues (`flagged == "yes"`) are excluded before constructing the time-to-event record for each individual. The actual measured bath temperature (`read_temp_c`) is used as the temperature covariate rather than the nominal `set_temp_c`, since the two diverge noticeably at higher target temperatures.
 
 ```{r build-survival-data}
 
@@ -139,7 +144,7 @@ aic_table = map_dfr(dists, function(d) {
 aic_table
 ```
 
-The log-logistic distribution has the lowest AIC. A likelihood ratio test comparing models with and without a population × temperature interaction shows the interaction is not supported over the full temperature range, so the additive model is used here.
+The log-logistic distribution has the lowest AIC. While a likelihood ratio test comparing models with and without a population × temperature interaction shows the interaction is not supported over the full temperature range, we are using a model that includes the interaction between temperature and population. The terms from this model are included in the table below. 
 
 ```{r fit-full-aft-model}
 
@@ -150,36 +155,6 @@ full_model_tidy
 ```
 
 Each 1°C increase in read temperature is associated with median survival time shrinking to about `r scales::percent(exp(full_model_tidy$estimate[full_model_tidy$term == "read_temp_c"]))` of its prior value (time ratio `r round(exp(full_model_tidy$estimate[full_model_tidy$term == "read_temp_c"]), 4)`, p `r format.pval(full_model_tidy$p.value[full_model_tidy$term == "read_temp_c"], digits = 2)`) — a steep, well-supported decline over the 31-34.8°C range tested. There is no evidence of a difference between populations once temperature is accounted for (time ratio `r round(exp(full_model_tidy$estimate[full_model_tidy$term == "populationOPOH"]), 2)`, p `r format.pval(full_model_tidy$p.value[full_model_tidy$term == "populationOPOH"], digits = 2)`), and the wide confidence interval on that estimate reflects the modest sample size.
-
-Median survival time predicted from the additive model, by population and temperature, plotted on a log scale. Predictions are shown across the full observed temperature range (31-34.8°C); extrapolation toward the lower end is poorly constrained because almost no deaths were observed at 31°C and 33.1°C within the observation window, so these predictions should be treated with caution.
-
-```{r plot-full-aft-predictions}
-full_pred_grid = expand_grid(
-  population = unique(surv_data$population),
-  read_temp_c = seq(min(surv_data$read_temp_c), max(surv_data$read_temp_c), length.out = 100)
-)
-
-full_pred = predict(full_model_interaction, newdata = full_pred_grid, type = "quantile", p = 0.5, se.fit = TRUE)
-
-full_pred_grid = full_pred_grid |>
-  mutate(
-    median_time = full_pred$fit,
-    se = full_pred$se.fit,
-    lwr = exp(log(median_time) - 1.96 * se / median_time),
-    upr = exp(log(median_time) + 1.96 * se / median_time)
-  )
-
-ggplot(full_pred_grid, aes(x = read_temp_c, y = median_time, color = population, fill = population)) +
-  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.15, color = NA) +
-  geom_line() +
-  scale_y_log10() +
-  labs(
-    x = "Water bath temperature (read, °C)",
-    y = "Predicted median survival time (min, log scale)",
-    title = "AFT model (log-logistic): median survival time vs. temperature"
-  ) +
-  theme_matt()
-```
 
 ## Just temperatures above 33°C
 
@@ -214,7 +189,7 @@ high_pred_grid = high_pred_grid |>
 
 ggplot(high_pred_grid, aes(x = read_temp_c, y = median_time, color = population, fill = population)) +
   #geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.15, color = NA) +
-  geom_line() +
+  geom_line(linewidth = 3) +
   #scale_y_log10() +
   labs(
     x = "Water bath temperature (read, °C)",
@@ -222,12 +197,13 @@ ggplot(high_pred_grid, aes(x = read_temp_c, y = median_time, color = population,
     title = "AFT model (log-logistic, population × temperature): median survival vs. temperature",
     subtitle = "Restricted to read temperatures above 33°C"
   ) +
-  theme_matt()
+  theme_matt() + 
+  theme(legend.position = "right")
 ```
 
 ## Tolerance Landscape Parameters
 
-Below, we re-fit a model to each population separately, and extract the relevant model parameters (intercept and slope term).
+Below, we re-fit a model to each population separately, and extract the relevant model parameters (intercept and slope term). These are shown below, and tend to fall within the expected range (CTmax is slightly higher than 35°C for each population, and the slopes are ~0.2, similar to what's been observed in other systems).
 
 ```{r}
 
@@ -244,13 +220,15 @@ TTL_params = surv_data_high %>%
   mutate(ctmax_static = -1*(Beta_0/temp_slope),
          z_slope = -1/temp_slope)
 
-```
+TTL_params |> 
+  select(population, ctmax_static, z_slope)
 
+```
 
 
 ### Dynamic Landscapes 
 
-Rezende et al. 2020 provide functions to 1) estimate the tolerance landscape from LT50 times and temperatures, and 2) use this landscape to predict mortality under fluctuating temperatures. Their original approach (`tolerance.landscape()`) first collapses each temperature to a single LT50 point estimate, then fits `ctmax`/`z` via lm across those points and builds the reference survival curve by interpolating raw per-temperature survival curves.
+Rezende et al. 2020 provide functions to 1) estimate the tolerance landscape from LT50 times and temperatures, and 2) use this landscape to predict mortality under fluctuating temperatures. Their original approach (`tolerance.landscape()`) first collapses each temperature to a single LT50 point estimate, then fits `ctmax`/`z` via a linear model across those points. They then build the reference survival curve by interpolating raw per-temperature survival curves.
 
 **Superseded exploratory step, not used downstream.** The chunk below (not evaluated) shows what that LT50-estimation step looks like; it is kept only for reference and is **not** the method used to build the landscape in this report. The `lt50_values` object it would produce is unused elsewhere.
 
@@ -267,11 +245,13 @@ lt50_values = surv_data_high %>%
 
 ggplot(lt50_values, aes(x = read_temp_c, y = log(lt50), colour = population)) + 
   geom_point() + 
-  geom_smooth(method = "lm")
+  geom_smooth(method = "lm", se = F) + 
+  theme_matt() + 
+  theme(legend.position = "right")
 
 ```
 
-Instead, we fit an AFT model to the full individual-level, censored survival data for each population (as in `TTL_params`) and extract the tolerance landscape directly from the model with `model_ttl()`. This uses all individuals rather than collapsing each temperature to a single LT50 estimate first, and propagates coefficient uncertainty into `ctmax`, `z`, and the reference survival curve via simulation from `vcov(model)`.
+Instead, we fit an AFT model to the full individual-level, censored survival data for each population (as in `TTL_params`) and extract the tolerance landscape directly from the model with `model_ttl()` - this is a modified version of the `tolerance.landscape()` function from Rezende. This uses all individuals rather than collapsing each temperature to a single LT50 estimate first, and propagates coefficient uncertainty into `ctmax`, `z`, and the reference survival curve via simulation from `vcov(model)`.
 
 ```{r}
 co_data = surv_data_high |> filter(population == "CPCO")
@@ -294,14 +274,24 @@ tibble(
 )
 ```
 
-In this first example, we simulate a simple fluctuating environment. Note, the function assumes temperature for each minute is provided. As we can see, even small differences in the tolerance landscape can lead to significant differences in the observed mortality. 
+## Mortality under variable temperatures
+
+One of the major advantages of the thermal tolerance landscape approach is the application of the parameters to predicting mortality under fluctuating environments.
+
+### Example 1
+
+In this first example, we simulate a simple fluctuating environment. Note, the function assumes temperature for each minute is provided. 
 
 ```{r}
 variable.temp <- rep(c(30, 34, 34.5),each=10, times = 4)
 
 co_dl <- dynamic.landscape(variable.temp,co_tl)	
-oh_dl <- dynamic.landscape(variable.temp,oh_tl)	
+oh_dl <- dynamic.landscape(variable.temp,oh_tl)
+```
 
+As we can see below, the two populations tested exhibit very similar levels of mortality under the simulated thermal environment. 
+
+```{r}
 surv_comp = bind_rows(data.frame("time" = co_dl$time, "alive" = co_dl$alive, "pop" = "CO"),
                       data.frame("time" = oh_dl$time, "alive" = oh_dl$alive, "pop" = "OH"))
 
@@ -310,19 +300,152 @@ ggplot(surv_comp, aes(x = time, y = alive, colour = pop)) +
   theme_matt()
 ```
 
+### Example 2
+
+In this second example, we use a continuous temperature record from a local site (a shallow stream in Carlisle, Massachusetts). Note: S. pallidus is not found in this habitat type, but the data will serve as an illustration of how continuous temperature data can be combined with TTL parameters to predict mortality. 
+
 ```{r}
 
-dyn_surv = dynamic.landscape(env_temps_minutes$temp_c, oh_tl)
+ggplot(env_temps_minutes, aes(x = date_time, y = temp_c)) + 
+  geom_line() + 
+  theme_matt()
 
+```
+
+The profile above covers a period from late Spring to early Summer. Most of these temperatures are well-below the observed CTmax of S. pallidus, so no mortality is expected. However, below we will summarize the temperature variability of the warmest week, and use this to examine how changes in temperature averages and variability affect survival. 
+
+```{r}
+library(slider)
+
+
+# Daily summary
+daily <- env_temps_minutes |>
+  mutate(date = as.Date(date_time)) |>
+  group_by(date) |>
+  summarise(mean_temp = mean(temp_c, na.rm = TRUE),
+            min_temp = min(temp_c, na.rm = TRUE),
+            max_temp = max(temp_c, na.rm = TRUE),
+            n = n()) |>
+  ungroup()
+
+range(daily$date)
+
+daily_roll <- daily |>
+  arrange(date) |>
+  mutate(roll_mean_temp = slide_dbl(mean_temp, mean, .before = 6, .complete = TRUE))
+
+# Find window ending on the date with max rolling mean
+warmest_end <- daily_roll |> filter(!is.na(roll_mean_temp)) |> slice_max(roll_mean_temp, n = 1) |> pull(date)
+
+warmest_start <- warmest_end - 6
+
+c(warmest_start, warmest_end)
+
+
+warmest_week_daily <- daily |> filter(date >= warmest_start, date <= warmest_end)
+
+warmest_week_daily
+
+warmest_week_summary <- warmest_week_daily |>
+  summarise(
+    week_start = min(date),
+    week_end = max(date),
+    mean_temp_week = mean(mean_temp),
+    mean_daily_range = mean(max_temp - min_temp),
+    min_daily_range = min(max_temp - min_temp),
+    max_daily_range = max(max_temp - min_temp)
+  )
+
+warmest_week_summary
+
+
+warmest_week_daily |>
+  mutate(daily_range = max_temp - min_temp)
+
+warmest_week_summary |> select(mean_daily_range, min_daily_range, max_daily_range)
+
+```
+
+Here we model daily temperature as a sinusoid centered on the target mean, with amplitude set so peak-to-trough equals the target daily range, phased so the trough falls in early morning and the peak in mid-afternoon (typical diurnal pattern).
+
+
+```{r}
+
+simulate_temp_week <- function(mean_temp, daily_range, start_date = as.Date("2026-01-01"),
+                                trough_hour = 5, peak_hour = 15, noise_sd = 0, seed = 4127) {
+  set.seed(seed)
+  amplitude <- daily_range / 2
+  n_minutes <- 7 * 24 * 60
+
+  # Datetime sequence at minute resolution
+  date_time <- seq(as.POSIXct(paste(start_date, "00:00:00")),
+                    by = "min", length.out = n_minutes)
+
+  # Fraction of day, phase-shifted so the minimum aligns with trough_hour
+  hour_of_day <- as.numeric(format(date_time, "%H")) +
+    as.numeric(format(date_time, "%M")) / 60
+  phase <- (peak_hour - trough_hour) / 24  # phase reference from trough
+
+  # Sinusoid: trough at trough_hour, peak at peak_hour
+  angle <- 2 * pi * (hour_of_day - trough_hour) / 24 - pi / 2 * 0
+  temp_c <- mean_temp - amplitude * cos(2 * pi * (hour_of_day - trough_hour) / 24)
+
+  # Add small autocorrelated-ish noise (simple white noise here for minute jitter)
+  temp_c <- temp_c + rnorm(n_minutes, mean = 0, sd = noise_sd)
+
+  tibble(date_time = date_time, temp_c = temp_c)
+}
+
+sim_week <- simulate_temp_week(
+  mean_temp = warmest_week_summary$mean_temp_week,
+  daily_range = warmest_week_summary$mean_daily_range
+)
+
+ggplot(sim_week, aes(date_time, temp_c)) +
+  geom_line() +
+  labs(x = "Date/time", y = "Temperature (°C)")
+
+```
+
+When applied to this simulated temperature regime, there is no predicted mortality. 
+
+```{r}
+
+dyn_surv = dynamic.landscape(sim_week$temp_c, oh_tl)
+
+```
+
+When we increase the average temperature (six degree increase), mortality increases. 
+
+```{r}
+
+sim_week_warm <- simulate_temp_week(
+  mean_temp = warmest_week_summary$mean_temp_week + 6,
+  daily_range = warmest_week_summary$mean_daily_range
+)
+
+warm_dyn_tl = dynamic.landscape(sim_week_warm$temp_c, oh_tl)
+
+```
+
+When we use the observed mean, but increase the temperature variability (), mortality decreases. 
+
+```{r}
+sim_week_var <- simulate_temp_week(
+  mean_temp = warmest_week_summary$mean_temp_week,
+  daily_range = warmest_week_summary$mean_daily_range + 12
+)
+
+var_dyn_tl = dynamic.landscape(sim_week_var$temp_c, oh_tl)
 ```
 
 The plot below overlays the temperature and survival data to highlight the alignment between peak temperatures and drops in survival. 
 
 ```{r}
 
-dyn_df = data.frame("time" = dyn_surv$time, 
-           "temp" = dyn_surv$ta, 
-           "surv" = dyn_surv$alive)
+dyn_df = data.frame("time" = var_dyn_tl$time, 
+           "temp" = var_dyn_tl$ta, 
+           "surv" = var_dyn_tl$alive)
 
 dyn_df_thin <- dyn_df |>
   filter(surv != lag(surv, default = -Inf) | row_number() == n())

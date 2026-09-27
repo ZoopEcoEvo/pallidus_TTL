@@ -34,8 +34,7 @@ env_temps = read.csv("Raw_data/stream_temps/22229810 2026-06-01 14_30_55 EDT.csv
 
 env_temps_minutes = env_temps |> 
   uncount(10) |> 
-  drop_na() |> 
-  mutate(temp_c = temp_c + 2.5)
+  drop_na()
 
 ##################################
 ### Read in the PROCESSED data ###

@@ -94,7 +94,7 @@
 # instead of individual median survival times per temperature/population.
 #
 # survreg models log(T) = X*beta + scale*W, where W follows a standard
-# distribution set by `dist` (logistic, normal, or extreme value). ctmax and
+# distribution set by `dist` (logistic, normal, or extreme value). CTmax and
 # z come directly from the model's intercept/slope; the reference survival
 # curve S is obtained analytically from that distribution's quantile
 # function at the mean temperature, rather than by interpolating raw data.
