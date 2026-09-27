@@ -1,10 +1,15 @@
 # Load in required packages
+source("Scripts/rezende_functions.R")
+
 library(rmarkdown)
+library(survival)
+library(broom)
+library(scales)
 library(tidyverse)
 
 #Determine which scripts should be run
 process_data = F #Runs data analysis 
-make_report = F #Runs project summary
+make_report = T #Runs project summary
 knit_manuscript = F #Compiles manuscript draft
 
 ############################
@@ -14,6 +19,23 @@ knit_manuscript = F #Compiles manuscript draft
 if(process_data == T){
   source(file = "Scripts/01_data_processing.R")
 }
+
+files = list.files("Raw_data/surv_data/", pattern = "\\.csv$", full.names = TRUE)
+
+raw_data = files |>
+  map(read_csv, show_col_types = FALSE) |>
+  list_rbind(names_to = "source_file")
+
+env_temps = read.csv("Raw_data/stream_temps/22229810 2026-06-01 14_30_55 EDT.csv") %>% 
+  janitor::clean_names() %>% 
+  dplyr::select("date_time" = date_time_edt, 
+                "temp_c" = temperature_c) %>% 
+  mutate(date_time = as_datetime(date_time, format = "%m/%d/%Y %H:%M:%S"))
+
+env_temps_minutes = env_temps |> 
+  uncount(10) |> 
+  drop_na() |> 
+  mutate(temp_c = temp_c + 2.5)
 
 ##################################
 ### Read in the PROCESSED data ###

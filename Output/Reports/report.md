@@ -1,0 +1,395 @@
+Thermal Tolerance Landscapes of *Skistodiaptomus pallidus*
+================
+2026-09-27
+
+- [Building the survival dataset](#building-the-survival-dataset)
+- [All data](#all-data)
+- [Just temperatures above 33°C](#just-temperatures-above-33c)
+- [Tolerance Landscape Parameters](#tolerance-landscape-parameters)
+  - [Dynamic Landscapes](#dynamic-landscapes)
+
+``` r
+
+raw_data |> 
+  select(set_temp_c, read_temp_c) |> 
+  distinct() |> 
+  ggplot(aes(x = set_temp_c, y = read_temp_c)) + 
+  geom_abline(intercept = 0, slope = 1) + 
+  geom_point() + 
+  theme_matt()
+```
+
+<img src="../Figures/markdown/unnamed-chunk-1-1.png" style="display: block; margin: auto;" />
+
+``` r
+
+raw_data |> group_by(source_file) |> 
+  count(read_temp_c) |> 
+  ggplot(aes(x = read_temp_c, y = n)) + 
+  geom_bar(stat = "identity")
+```
+
+<img src="../Figures/markdown/unnamed-chunk-2-1.png" style="display: block; margin: auto;" />
+
+## Building the survival dataset
+
+`responding == "no"` indicates death. Rows flagged for data-quality
+issues (`flagged == "yes"`) are excluded before constructing one
+time-to-event record per individual: the death time is the first
+timepoint at which an individual is recorded as not responding, or, if
+it never stops responding, the last observed timepoint (right-censored).
+The actual measured bath temperature (`read_temp_c`) is used as the
+temperature covariate rather than the nominal `set_temp_c`, since the
+two diverge noticeably at higher target temperatures.
+
+``` r
+
+surv_data = raw_data |>
+  filter(flagged != "yes" | is.na(flagged)) |>
+  arrange(source_file, water_bath_id, stopwatch_start_time, well_id, timepoint_min) |>
+  group_by(source_file, water_bath_id, stopwatch_start_time, well_id, population, read_temp_c) |>
+  summarise(
+    time = if (any(responding == "no")) min(timepoint_min[responding == "no"]) else max(timepoint_min),
+    event = as.integer(any(responding == "no")),
+    n_obs = n(),
+    .groups = "drop"
+  )
+
+surv_data
+## # A tibble: 135 × 9
+##    source_file water_bath_id stopwatch_start_time well_id
+##          <int> <chr>         <dttm>               <chr>  
+##  1           1 WB-1          2026-08-20 14:26:09  A1     
+##  2           1 WB-1          2026-08-20 14:26:09  A2     
+##  3           1 WB-1          2026-08-20 14:26:09  A3     
+##  4           1 WB-1          2026-08-20 14:26:09  A4     
+##  5           1 WB-1          2026-08-20 14:26:09  A5     
+##  6           1 WB-1          2026-08-20 14:26:09  B1     
+##  7           1 WB-1          2026-08-20 14:26:09  B2     
+##  8           1 WB-1          2026-08-20 14:26:09  B3     
+##  9           1 WB-1          2026-08-20 14:26:09  B4     
+## 10           1 WB-1          2026-08-20 14:26:09  B5     
+## # ℹ 125 more rows
+## # ℹ 5 more variables: population <chr>, read_temp_c <dbl>,
+## #   time <dbl>, event <int>, n_obs <int>
+```
+
+## All data
+
+Individual survival times are modeled jointly across all temperatures
+using an accelerated failure time (AFT) model, rather than fitting
+separate Kaplan-Meier curves per temperature, since many
+temperature/population cells have only 10 individuals. Weibull,
+log-normal, and log-logistic distributions are compared by AIC.
+
+``` r
+dists = c("weibull", "lognormal", "loglogistic")
+
+aic_table = map_dfr(dists, function(d) {
+  m = survreg(Surv(time, event) ~ population * read_temp_c, data = surv_data, dist = d)
+  tibble(dist = d, AIC = AIC(m), logLik = as.numeric(logLik(m)))
+})
+
+aic_table
+## # A tibble: 3 × 3
+##   dist          AIC logLik
+##   <chr>       <dbl>  <dbl>
+## 1 weibull      914.  -452.
+## 2 lognormal    912.  -451.
+## 3 loglogistic  910.  -450.
+```
+
+The log-logistic distribution has the lowest AIC. A likelihood ratio
+test comparing models with and without a population × temperature
+interaction shows the interaction is not supported over the full
+temperature range, so the additive model is used here.
+
+``` r
+
+full_model_interaction = survreg(Surv(time, event) ~ population * read_temp_c, data = surv_data, dist = "loglogistic")
+
+full_model_tidy = tidy(full_model_interaction, conf.int = TRUE)
+full_model_tidy
+## # A tibble: 5 × 7
+##   term    estimate std.error statistic p.value conf.low conf.high
+##   <chr>      <dbl>     <dbl>     <dbl>   <dbl>    <dbl>     <dbl>
+## 1 (Inter…  144.      28.5        5.06  4.11e-7    88.5     200.  
+## 2 popula…   14.9     41.5        0.358 7.20e-1   -66.5      96.2 
+## 3 read_t…   -4.07     0.831     -4.90  9.48e-7    -5.70     -2.44
+## 4 popula…   -0.428    1.21      -0.354 7.24e-1    -2.80      1.94
+## 5 Log(sc…    0.435    0.0963     4.51  6.40e-6    NA        NA
+```
+
+Each 1°C increase in read temperature is associated with median survival
+time shrinking to about 2% of its prior value (time ratio 0.017, p
+9.5e-07) — a steep, well-supported decline over the 31-34.8°C range
+tested. There is no evidence of a difference between populations once
+temperature is accounted for (time ratio 2.8700438^{6}, p 0.72), and the
+wide confidence interval on that estimate reflects the modest sample
+size.
+
+Median survival time predicted from the additive model, by population
+and temperature, plotted on a log scale. Predictions are shown across
+the full observed temperature range (31-34.8°C); extrapolation toward
+the lower end is poorly constrained because almost no deaths were
+observed at 31°C and 33.1°C within the observation window, so these
+predictions should be treated with caution.
+
+``` r
+full_pred_grid = expand_grid(
+  population = unique(surv_data$population),
+  read_temp_c = seq(min(surv_data$read_temp_c), max(surv_data$read_temp_c), length.out = 100)
+)
+
+full_pred = predict(full_model_interaction, newdata = full_pred_grid, type = "quantile", p = 0.5, se.fit = TRUE)
+
+full_pred_grid = full_pred_grid |>
+  mutate(
+    median_time = full_pred$fit,
+    se = full_pred$se.fit,
+    lwr = exp(log(median_time) - 1.96 * se / median_time),
+    upr = exp(log(median_time) + 1.96 * se / median_time)
+  )
+
+ggplot(full_pred_grid, aes(x = read_temp_c, y = median_time, color = population, fill = population)) +
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.15, color = NA) +
+  geom_line() +
+  scale_y_log10() +
+  labs(
+    x = "Water bath temperature (read, °C)",
+    y = "Predicted median survival time (min, log scale)",
+    title = "AFT model (log-logistic): median survival time vs. temperature"
+  ) +
+  theme_matt()
+```
+
+<img src="../Figures/markdown/plot-full-aft-predictions-1.png" style="display: block; margin: auto;" />
+
+## Just temperatures above 33°C
+
+Restricting to individuals held at read temperatures above 33°C, an AFT
+model is fit with a population × temperature interaction, per the
+analysis plan, even though the interaction was not significant over the
+full temperature range.
+
+``` r
+surv_data_high = surv_data |> filter(read_temp_c > 33)
+
+high_temp_model = survreg(Surv(time, event) ~ population * read_temp_c, data = surv_data_high, dist = "loglogistic")
+
+high_temp_tidy = tidy(high_temp_model, conf.int = TRUE)
+high_temp_tidy
+## # A tibble: 5 × 7
+##   term    estimate std.error statistic p.value conf.low conf.high
+##   <chr>      <dbl>     <dbl>     <dbl>   <dbl>    <dbl>     <dbl>
+## 1 (Inter…  144.      28.5        5.06  4.26e-7    88.4     200.  
+## 2 popula…   14.9     41.6        0.358 7.20e-1   -66.5      96.3 
+## 3 read_t…   -4.07     0.832     -4.90  9.79e-7    -5.70     -2.44
+## 4 popula…   -0.429    1.21      -0.354 7.23e-1    -2.80      1.95
+## 5 Log(sc…    0.435    0.0963     4.51  6.41e-6    NA        NA
+```
+
+The interaction term remains non-significant (p 0.72), so there is still
+no evidence that the two populations decline at different rates as
+temperature rises above 33°C — both show a similarly steep drop in
+median survival time (main effect of read temperature: time ratio 0.0171
+per 1°C, p 9.8e-07). The interaction is retained here per the analysis
+plan, but given its lack of significance and the small per-cell sample
+sizes, the near-parallel curves in the plot below should be interpreted
+cautiously rather than as confirmed evidence of population-specific
+slopes.
+
+``` r
+high_pred_grid = expand_grid(
+  population = unique(surv_data_high$population),
+  read_temp_c = seq(min(surv_data_high$read_temp_c), max(surv_data_high$read_temp_c), length.out = 100)
+)
+
+high_pred = predict(high_temp_model, newdata = high_pred_grid, type = "quantile", p = 0.5, se.fit = TRUE)
+
+high_pred_grid = high_pred_grid |>
+  mutate(
+    median_time = high_pred$fit,
+    se = high_pred$se.fit,
+    lwr = exp(log(median_time) - 1.96 * se / median_time),
+    upr = exp(log(median_time) + 1.96 * se / median_time)
+  )
+
+ggplot(high_pred_grid, aes(x = read_temp_c, y = median_time, color = population, fill = population)) +
+  #geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.15, color = NA) +
+  geom_line() +
+  #scale_y_log10() +
+  labs(
+    x = "Water bath temperature (read, °C)",
+    y = "Predicted median survival time (min, log scale)",
+    title = "AFT model (log-logistic, population × temperature): median survival vs. temperature",
+    subtitle = "Restricted to read temperatures above 33°C"
+  ) +
+  theme_matt()
+```
+
+<img src="../Figures/markdown/plot-restricted-aft-predictions-1.png" style="display: block; margin: auto;" />
+
+## Tolerance Landscape Parameters
+
+Below, we re-fit a model to each population separately, and extract the
+relevant model parameters (intercept and slope term).
+
+``` r
+
+TTL_params = surv_data_high %>%
+  group_by(population) %>%
+  do(tidy(survreg(Surv(time, event) ~ read_temp_c, data = ., dist = "loglogistic"))) |> 
+  mutate(term = if_else(term == "(Intercept)", "Beta_0", term)) |> 
+  filter(term != "Log(scale)") |> 
+  pivot_wider(id_cols = population, 
+              names_from = term, 
+              values_from = c(estimate, std.error)) |>  
+  select(population, "Beta_0" = estimate_Beta_0, "temp_slope" = estimate_read_temp_c, 
+         "std_err_beta_0" = std.error_Beta_0, "std_err_slope" = std.error_read_temp_c) |> 
+  mutate(ctmax_static = -1*(Beta_0/temp_slope),
+         z_slope = -1/temp_slope)
+```
+
+### Dynamic Landscapes
+
+Rezende et al. 2020 provide functions to 1) estimate the tolerance
+landscape from LT50 times and temperatures, and 2) use this landscape to
+predict mortality under fluctuating temperatures. Their original
+approach (`tolerance.landscape()`) first collapses each temperature to a
+single LT50 point estimate, then fits `ctmax`/`z` via lm across those
+points and builds the reference survival curve by interpolating raw
+per-temperature survival curves.
+
+**Superseded exploratory step, not used downstream.** The chunk below
+(not evaluated) shows what that LT50-estimation step looks like; it is
+kept only for reference and is **not** the method used to build the
+landscape in this report. The `lt50_values` object it would produce is
+unused elsewhere.
+
+``` r
+
+lt50_values = surv_data_high %>%
+  group_by(population, read_temp_c) %>%
+  nest() %>%
+  mutate(
+    model = map(data, ~ survreg(Surv(time, event) ~ 1, data = .x, dist = "loglogistic")),
+    lt50 = map_dbl(model, ~ predict(.x, type = "quantile", p = 0.5)[1])
+  ) %>%
+  dplyr::select(population, lt50)
+
+ggplot(lt50_values, aes(x = read_temp_c, y = log(lt50), colour = population)) + 
+  geom_point() + 
+  geom_smooth(method = "lm")
+```
+
+Instead, we fit an AFT model to the full individual-level, censored
+survival data for each population (as in `TTL_params`) and extract the
+tolerance landscape directly from the model with `model_ttl()`. This
+uses all individuals rather than collapsing each temperature to a single
+LT50 estimate first, and propagates coefficient uncertainty into
+`ctmax`, `z`, and the reference survival curve via simulation from
+`vcov(model)`.
+
+``` r
+co_data = surv_data_high |> filter(population == "CPCO")
+oh_data = surv_data_high |> filter(population == "OPOH")
+
+co_model = survreg(Surv(time, event) ~ read_temp_c, data = co_data, dist = "loglogistic")
+oh_model = survreg(Surv(time, event) ~ read_temp_c, data = oh_data, dist = "loglogistic")
+
+co_tl = model_ttl(co_model, "read_temp_c", seed = 6053)
+oh_tl = model_ttl(oh_model, "read_temp_c", seed = 7481)
+
+tibble(
+  population = c("CPCO", "OPOH"),
+  ctmax = c(co_tl$ctmax, oh_tl$ctmax),
+  ctmax_lwr = c(co_tl$ctmax.ci[1], oh_tl$ctmax.ci[1]),
+  ctmax_upr = c(co_tl$ctmax.ci[2], oh_tl$ctmax.ci[2]),
+  z = c(co_tl$z, oh_tl$z),
+  z_lwr = c(co_tl$z.ci[1], oh_tl$z.ci[1]),
+  z_upr = c(co_tl$z.ci[2], oh_tl$z.ci[2])
+)
+## # A tibble: 2 × 7
+##   population ctmax ctmax_lwr ctmax_upr     z z_lwr z_upr
+##   <chr>      <dbl>     <dbl>     <dbl> <dbl> <dbl> <dbl>
+## 1 CPCO        35.4      35.1      36.2 0.244 0.172 0.419
+## 2 OPOH        35.4      35.1      36.1 0.224 0.163 0.359
+```
+
+In this first example, we simulate a simple fluctuating environment.
+Note, the function assumes temperature for each minute is provided. As
+we can see, even small differences in the tolerance landscape can lead
+to significant differences in the observed mortality.
+
+``` r
+variable.temp <- rep(c(30, 34, 34.5),each=10, times = 4)
+
+co_dl <- dynamic.landscape(variable.temp,co_tl) 
+```
+
+<img src="../Figures/markdown/unnamed-chunk-6-1.png" style="display: block; margin: auto;" />
+
+``` r
+oh_dl <- dynamic.landscape(variable.temp,oh_tl) 
+```
+
+<img src="../Figures/markdown/unnamed-chunk-6-2.png" style="display: block; margin: auto;" />
+
+``` r
+
+surv_comp = bind_rows(data.frame("time" = co_dl$time, "alive" = co_dl$alive, "pop" = "CO"),
+                      data.frame("time" = oh_dl$time, "alive" = oh_dl$alive, "pop" = "OH"))
+
+ggplot(surv_comp, aes(x = time, y = alive, colour = pop)) + 
+  geom_line(linewidth = 2) + 
+  theme_matt()
+```
+
+<img src="../Figures/markdown/unnamed-chunk-6-3.png" style="display: block; margin: auto;" />
+
+``` r
+
+dyn_surv = dynamic.landscape(env_temps_minutes$temp_c, oh_tl)
+```
+
+<img src="../Figures/markdown/unnamed-chunk-7-1.png" style="display: block; margin: auto;" />
+
+The plot below overlays the temperature and survival data to highlight
+the alignment between peak temperatures and drops in survival.
+
+``` r
+
+dyn_df = data.frame("time" = dyn_surv$time, 
+           "temp" = dyn_surv$ta, 
+           "surv" = dyn_surv$alive)
+
+dyn_df_thin <- dyn_df |>
+  filter(surv != lag(surv, default = -Inf) | row_number() == n())
+
+temp_range <- range(dyn_df$temp)
+surv_range <- range(dyn_df$surv)
+
+surv_range_fixed <- c(0, 100)
+
+scale_surv <- function(x) (x - surv_range_fixed[1]) / diff(surv_range_fixed) * diff(temp_range) + temp_range[1]
+
+unscale_surv <- function(x) (x - temp_range[1]) / diff(temp_range) * diff(surv_range_fixed) + surv_range_fixed[1]
+
+ggplot(dyn_df, aes(x = time)) +
+  geom_line(aes(y = temp, color = "Temperature (°C)"), 
+            linewidth = 1) +
+  geom_line(data = dyn_df_thin, 
+            aes(y = scale_surv(surv), color = "Survival (%)"), 
+            linewidth = 2) +
+  scale_y_continuous(
+    name = "Temperature (°C)",
+    sec.axis = sec_axis(~ unscale_surv(.), name = "Survival (%)")
+  ) +
+  scale_color_manual(values = c("Survival (%)" = "steelblue", "Temperature (°C)" = "firebrick")) +
+  labs(x = "Time", color = NULL) + 
+  theme_matt() + 
+  theme(legend.position = "right")
+```
+
+<img src="../Figures/markdown/unnamed-chunk-8-1.png" style="display: block; margin: auto;" />

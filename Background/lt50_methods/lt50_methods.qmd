@@ -44,8 +44,9 @@ Simulated data is included for use in this document.
 
 ```{r}
 
-surv_data = read.csv(file = "Background/lt50_methods/survival_assay_2026-08-15.csv") %>% 
-  mutate(assay_num = as.numeric(as.factor(experiment_date)), 
+surv_data = raw_data %>% 
+  filter(set_temp_c > 32) |> 
+  mutate(exp_day = as.numeric(as.factor(experiment_date)), 
          surv = if_else(responding == "yes", 1, 0))
 
 glimpse(surv_data)
@@ -85,7 +86,7 @@ This data would be analyzed using a mixed-effects logistic regression, where ind
 surv.model = glmer(data = surv_data, 
                    surv ~ timepoint_min * population * read_temp_c +
                      (1 | well_id) + 
-                     (1 | assay_num), 
+                     (1 | exp_day), 
                    family = binomial)
 
 summary(surv.model)
@@ -126,7 +127,7 @@ lt50_values = nested_data %>%
     # Fit binomial model for each group of interest
     model = map(data, ~ glmer(surv ~ timepoint_min + 
                                 (1 | well_id) + 
-                                (1 | assay_num), 
+                                (1 | exp_day), 
                               family = binomial, data = .x)),
     dose_p_res = map(model, ~ {
       est = dose.p.glmm(.x, p = 0.5)     # Extract LT50 for each subset model
@@ -218,7 +219,7 @@ num_temps = length(unique(event_data$read_temp_c))
 new_dat = data.frame(
   population = rep(pop_list, each = num_temps),
   read_temp_c = unique(event_data$read_temp_c), 
-  assay_num = 1, 
+  exp_day = 1, 
   well_id = "A1")
 
 # Compute survfit using the fitted cox model for the levels in newdata
@@ -235,9 +236,11 @@ The estimated LT50 values are shown below. Note that the LT50 values are all int
 
 ```{r}
 
-ggplot(cox_lt50, aes(x = read_temp_c, y = lt50, colour = population)) + 
+cox_lt50 |> 
+  drop_na(lt50) |> 
+ggplot(aes(x = read_temp_c, y = log(lt50), colour = population)) + 
   geom_point(size = 3) + 
-  geom_line(linewidth = 2) + 
+  geom_smooth(method = "lm") + 
   theme_bw(base_size = 20) + 
   theme(panel.grid = element_blank())
 
@@ -250,7 +253,7 @@ An alternative here is to use a Weibull model instead of a Cox model. This will 
 ```{r}
 
 # Fit a Weibull survival model with interacting covariates for population and temperature
-weibull = survreg(Surv(timepoint_min, event) ~ population * read_temp_c + assay_num + well_id, 
+weibull = survreg(Surv(timepoint_min, event) ~ population * read_temp_c, 
                   data = event_data, 
                   dist = "weibull")
 
@@ -282,18 +285,16 @@ ggplot(weibull_lt50, aes(x = read_temp_c, y = lt50, colour = population)) +
 These three approaches (logistic regression, Cox model, and Weibull regression) provide three different estimates of LT50 values. These values can vary quite strongly, with the estimates from logistic regression tending to be lower than the two survival analysis metrics. 
 
 ```{r}
-comp_data = lt50_values %>% 
-  inner_join(cox_lt50, by = c("read_temp_c", "population")) %>% 
-  inner_join(weibull_lt50, by = c("read_temp_c", "population")) %>% 
-  select(read_temp_c, population, "logistic_lt50" = lt50.x, "cox_lt50" = lt50.y, "weibull_lt50" = lt50)
+comp_data =  inner_join(cox_lt50, weibull_lt50, by = c("read_temp_c", "population", "exp_day", "well_id")) %>% 
+  dplyr::select(read_temp_c, population, "cox_lt50" = lt50.x, "weibull_lt50" = lt50.y)
 
 comp_data %>% 
-  pivot_longer(cols = c("logistic_lt50", "cox_lt50", "weibull_lt50"), 
+  pivot_longer(cols = c("cox_lt50", "weibull_lt50"), 
                names_to = c("method", NA), 
                names_sep = "_",
                values_to = "lt50") %>% 
   ggplot(aes(x = population, y = lt50, fill = method)) + 
-  facet_wrap(read_temp_c~.) + 
+  facet_wrap(read_temp_c~., scales = "free") + 
   geom_bar(stat = "identity", 
            color = "black", linewidth = 0.1,
            position = position_dodge(),
@@ -306,7 +307,7 @@ The two continuous LT50 estimates (logistic and Weibull) tend to be positively c
 
 ```{r}
 
-ggplot(comp_data, aes(x = logistic_lt50, y = weibull_lt50, colour = population)) + 
+ggplot(comp_data, aes(x = cox_lt50, y = weibull_lt50, colour = population)) + 
   facet_wrap(.~read_temp_c, scales = "free") + 
   geom_abline(slope = 1, intercept = 0, linewidth = 2) + 
   geom_point(size = 5) + 
@@ -325,7 +326,7 @@ Individual values can still differ strongly. The OP value for the 31.5 stress te
 ```{r fig.width=10, fig.height=5}
 
 log_plot = surv_data %>% 
-  filter(population == "OP" & read_temp_c == 32.5) %>%  
+  filter(population == "OPOH" & read_temp_c == 34.4) %>%  
   ggplot(aes(x = timepoint_min, y = surv)) + 
   geom_hline(yintercept = 0.5, colour = "grey") + 
   geom_point(position = position_jitter(height = 0, width = 0.1),
@@ -340,7 +341,7 @@ log_plot = surv_data %>%
 
 
 op_data = event_data %>% 
-  filter(population == "OP" & read_temp_c == 32.5)
+  filter(population == "OPOH" & read_temp_c == 34.4)
 
 # Fit a Weibull survival model with interacting covariates for population and temperature
 op_weibull = survreg(Surv(timepoint_min, event) ~ 1, 
