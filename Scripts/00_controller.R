@@ -24,7 +24,8 @@ files = list.files("Raw_data/surv_data/", pattern = "\\.csv$", full.names = TRUE
 
 raw_data = files |>
   map(read_csv, show_col_types = FALSE) |>
-  list_rbind(names_to = "source_file")
+  list_rbind(names_to = "source_file") |> 
+  filter(experiment_date > "2026-10-08")
 
 env_temps = read.csv("Raw_data/stream_temps/22229810 2026-06-01 14_30_55 EDT.csv") %>% 
   janitor::clean_names() %>% 

@@ -1,12 +1,14 @@
 Thermal Tolerance Landscapes of *Skistodiaptomus pallidus*
 ================
-2026-09-27
+2026-10-21
 
 - [Building the survival dataset](#building-the-survival-dataset)
 - [All data](#all-data)
 - [Just temperatures above 33°C](#just-temperatures-above-33c)
 - [Tolerance Landscape Parameters](#tolerance-landscape-parameters)
-  - [Dynamic Landscapes](#dynamic-landscapes)
+- [Dynamic Landscapes](#dynamic-landscapes)
+- [Tolerance Landscape
+  Visualization](#tolerance-landscape-visualization)
 - [Mortality under variable
   temperatures](#mortality-under-variable-temperatures)
   - [Example 1](#example-1)
@@ -60,9 +62,9 @@ higher target temperatures.
 ``` r
 
 surv_data = raw_data |>
-  filter(flagged != "yes" | is.na(flagged)) |>
+  #filter(flagged != "yes" | is.na(flagged)) |>
   arrange(source_file, water_bath_id, stopwatch_start_time, well_id, timepoint_min) |>
-  group_by(source_file, water_bath_id, stopwatch_start_time, well_id, population, read_temp_c) |>
+  group_by(source_file, experiment_date, water_bath_id, stopwatch_start_time, well_id, population, read_temp_c) |>
   summarise(
     time = if (any(responding == "no")) min(timepoint_min[responding == "no"]) else max(timepoint_min),
     event = as.integer(any(responding == "no")),
@@ -71,20 +73,21 @@ surv_data = raw_data |>
   )
 
 surv_data
-## # A tibble: 135 × 9
-##    source_file water_bath_id stopwatch_start_time well_id population read_temp_c  time event n_obs
-##          <int> <chr>         <dttm>               <chr>   <chr>            <dbl> <dbl> <int> <int>
-##  1           1 WB-1          2026-08-20 14:26:09  A1      CPCO                31    30     0     4
-##  2           1 WB-1          2026-08-20 14:26:09  A2      OPOH                31    30     0     4
-##  3           1 WB-1          2026-08-20 14:26:09  A3      CPCO                31    30     0     4
-##  4           1 WB-1          2026-08-20 14:26:09  A4      OPOH                31    30     0     4
-##  5           1 WB-1          2026-08-20 14:26:09  A5      CPCO                31    30     0     4
-##  6           1 WB-1          2026-08-20 14:26:09  B1      OPOH                31    30     0     4
-##  7           1 WB-1          2026-08-20 14:26:09  B2      CPCO                31    30     0     4
-##  8           1 WB-1          2026-08-20 14:26:09  B3      CPCO                31    30     0     4
-##  9           1 WB-1          2026-08-20 14:26:09  B4      OPOH                31    30     0     4
-## 10           1 WB-1          2026-08-20 14:26:09  B5      CPCO                31    30     0     4
-## # ℹ 125 more rows
+## # A tibble: 140 × 10
+##    source_file experiment_date water_bath_id stopwatch_start_time well_id population read_temp_c  time
+##          <int> <date>          <chr>         <dttm>               <chr>   <chr>            <dbl> <dbl>
+##  1           8 2026-10-09      WB-1          2026-10-09 13:25:09  A1      OPOH              34.4    10
+##  2           8 2026-10-09      WB-1          2026-10-09 13:25:09  A2      OPOH              34.4    15
+##  3           8 2026-10-09      WB-1          2026-10-09 13:25:09  A3      OPOH              34.4     6
+##  4           8 2026-10-09      WB-1          2026-10-09 13:25:09  A4      CPCO              34.4     6
+##  5           8 2026-10-09      WB-1          2026-10-09 13:25:09  A5      OPOH              34.4     3
+##  6           8 2026-10-09      WB-1          2026-10-09 13:25:09  B1      CPCO              34.4    10
+##  7           8 2026-10-09      WB-1          2026-10-09 13:25:09  B2      OPOH              34.4    15
+##  8           8 2026-10-09      WB-1          2026-10-09 13:25:09  B3      OPOH              34.4    30
+##  9           8 2026-10-09      WB-1          2026-10-09 13:25:09  B4      CPCO              34.4    10
+## 10           8 2026-10-09      WB-1          2026-10-09 13:25:09  B5      CPCO              34.4     3
+## # ℹ 130 more rows
+## # ℹ 2 more variables: event <int>, n_obs <int>
 ```
 
 ## All data
@@ -107,9 +110,9 @@ aic_table
 ## # A tibble: 3 × 3
 ##   dist          AIC logLik
 ##   <chr>       <dbl>  <dbl>
-## 1 weibull      914.  -452.
-## 2 lognormal    912.  -451.
-## 3 loglogistic  910.  -450.
+## 1 weibull     1102.  -546.
+## 2 lognormal   1034.  -512.
+## 3 loglogistic 1007.  -499.
 ```
 
 The log-logistic distribution has the lowest AIC. While a likelihood
@@ -126,22 +129,21 @@ full_model_interaction = survreg(Surv(time, event) ~ population * read_temp_c, d
 full_model_tidy = tidy(full_model_interaction, conf.int = TRUE)
 full_model_tidy
 ## # A tibble: 5 × 7
-##   term                       estimate std.error statistic     p.value conf.low conf.high
-##   <chr>                         <dbl>     <dbl>     <dbl>       <dbl>    <dbl>     <dbl>
-## 1 (Intercept)                 144.      28.5        5.06  0.000000411    88.5     200.  
-## 2 populationOPOH               14.9     41.5        0.358 0.720         -66.5      96.2 
-## 3 read_temp_c                  -4.07     0.831     -4.90  0.000000948    -5.70     -2.44
-## 4 populationOPOH:read_temp_c   -0.428    1.21      -0.354 0.724          -2.80      1.94
-## 5 Log(scale)                    0.435    0.0963     4.51  0.00000640     NA        NA
+##   term                       estimate std.error statistic  p.value conf.low conf.high
+##   <chr>                         <dbl>     <dbl>     <dbl>    <dbl>    <dbl>     <dbl>
+## 1 (Intercept)                  74.9     13.8        5.45  5.13e- 8   48.0      102.  
+## 2 populationOPOH              -12.4     18.5       -0.667 5.05e- 1  -48.7       24.0 
+## 3 read_temp_c                  -2.11     0.398     -5.31  1.11e- 7   -2.89      -1.33
+## 4 populationOPOH:read_temp_c    0.358    0.537      0.667 5.05e- 1   -0.694      1.41
+## 5 Log(scale)                   -0.576    0.0748    -7.70  1.36e-14   NA         NA
 ```
 
 Each 1°C increase in read temperature is associated with median survival
-time shrinking to about 2% of its prior value (time ratio 0.017, p
-9.5e-07) — a steep, well-supported decline over the 31-34.8°C range
+time shrinking to about 12% of its prior value (time ratio 0.1209, p
+1.1e-07) — a steep, well-supported decline over the 31-34.8°C range
 tested. There is no evidence of a difference between populations once
-temperature is accounted for (time ratio 2.8700438^{6}, p 0.72), and the
-wide confidence interval on that estimate reflects the modest sample
-size.
+temperature is accounted for (time ratio 0, p 0.5), and the wide
+confidence interval on that estimate reflects the modest sample size.
 
 ## Just temperatures above 33°C
 
@@ -158,20 +160,20 @@ high_temp_model = survreg(Surv(time, event) ~ population * read_temp_c, data = s
 high_temp_tidy = tidy(high_temp_model, conf.int = TRUE)
 high_temp_tidy
 ## # A tibble: 5 × 7
-##   term                       estimate std.error statistic     p.value conf.low conf.high
-##   <chr>                         <dbl>     <dbl>     <dbl>       <dbl>    <dbl>     <dbl>
-## 1 (Intercept)                 144.      28.5        5.06  0.000000426    88.4     200.  
-## 2 populationOPOH               14.9     41.6        0.358 0.720         -66.5      96.3 
-## 3 read_temp_c                  -4.07     0.832     -4.90  0.000000979    -5.70     -2.44
-## 4 populationOPOH:read_temp_c   -0.429    1.21      -0.354 0.723          -2.80      1.95
-## 5 Log(scale)                    0.435    0.0963     4.51  0.00000641     NA        NA
+##   term                       estimate std.error statistic  p.value conf.low conf.high
+##   <chr>                         <dbl>     <dbl>     <dbl>    <dbl>    <dbl>     <dbl>
+## 1 (Intercept)                  74.9     13.8        5.45  5.13e- 8   48.0      102.  
+## 2 populationOPOH              -12.4     18.5       -0.667 5.05e- 1  -48.7       24.0 
+## 3 read_temp_c                  -2.11     0.398     -5.31  1.11e- 7   -2.89      -1.33
+## 4 populationOPOH:read_temp_c    0.358    0.537      0.667 5.05e- 1   -0.694      1.41
+## 5 Log(scale)                   -0.576    0.0748    -7.70  1.36e-14   NA         NA
 ```
 
-The interaction term remains non-significant (p 0.72), so there is still
+The interaction term remains non-significant (p 0.5), so there is still
 no evidence that the two populations decline at different rates as
 temperature rises above 33°C — both show a similarly steep drop in
-median survival time (main effect of read temperature: time ratio 0.0171
-per 1°C, p 9.8e-07). The interaction is retained here per the analysis
+median survival time (main effect of read temperature: time ratio 0.1209
+per 1°C, p 1.1e-07). The interaction is retained here per the analysis
 plan, but given its lack of significance and the small per-cell sample
 sizes, the near-parallel curves in the plot below should be interpreted
 cautiously rather than as confirmed evidence of population-specific
@@ -238,11 +240,11 @@ TTL_params |>
 ## # Groups:   population [2]
 ##   population ctmax_static z_slope
 ##   <chr>             <dbl>   <dbl>
-## 1 CPCO               35.4   0.244
-## 2 OPOH               35.4   0.224
+## 1 CPCO               35.4   0.451
+## 2 OPOH               35.7   0.569
 ```
 
-### Dynamic Landscapes
+## Dynamic Landscapes
 
 Rezende et al. 2020 provide functions to 1) estimate the tolerance
 landscape from LT50 times and temperatures, and 2) use this landscape to
@@ -261,20 +263,25 @@ unused elsewhere.
 ``` r
 
 lt50_values = surv_data_high %>%
-  group_by(population, read_temp_c) %>%
+  group_by(population, experiment_date, read_temp_c) %>%
   nest() %>%
   mutate(
     model = map(data, ~ survreg(Surv(time, event) ~ 1, data = .x, dist = "loglogistic")),
     lt50 = map_dbl(model, ~ predict(.x, type = "quantile", p = 0.5)[1])
   ) %>%
-  dplyr::select(population, lt50)
+  dplyr::select(population, lt50) |>  
+  filter(read_temp_c < 35.4) %>% 
+  filter(lt50 > 2)
 
-ggplot(lt50_values, aes(x = read_temp_c, y = log(lt50), colour = population)) + 
-  geom_point() + 
-  geom_smooth(method = "lm", se = F) + 
+ggplot(lt50_values, aes(x = read_temp_c, y = log(lt50))) + 
+  facet_wrap(population~.) + 
+  geom_point(aes(colour = factor(experiment_date))) + 
+  geom_smooth(method = "lm", se = F, colour = "black") + 
   theme_matt() + 
   theme(legend.position = "right")
 ```
+
+<img src="../Figures/markdown/unnamed-chunk-4-1.png" style="display: block; margin: auto;" />
 
 Instead, we fit an AFT model to the full individual-level, censored
 survival data for each population (as in `TTL_params`) and extract the
@@ -295,7 +302,7 @@ oh_model = survreg(Surv(time, event) ~ read_temp_c, data = oh_data, dist = "logl
 co_tl = model_ttl(co_model, "read_temp_c", seed = 6053)
 oh_tl = model_ttl(oh_model, "read_temp_c", seed = 7481)
 
-tibble(
+parameters = tibble(
   population = c("CPCO", "OPOH"),
   ctmax = c(co_tl$ctmax, oh_tl$ctmax),
   ctmax_lwr = c(co_tl$ctmax.ci[1], oh_tl$ctmax.ci[1]),
@@ -304,12 +311,131 @@ tibble(
   z_lwr = c(co_tl$z.ci[1], oh_tl$z.ci[1]),
   z_upr = c(co_tl$z.ci[2], oh_tl$z.ci[2])
 )
-## # A tibble: 2 × 7
-##   population ctmax ctmax_lwr ctmax_upr     z z_lwr z_upr
-##   <chr>      <dbl>     <dbl>     <dbl> <dbl> <dbl> <dbl>
-## 1 CPCO        35.4      35.1      36.2 0.244 0.172 0.419
-## 2 OPOH        35.4      35.1      36.1 0.224 0.163 0.359
 ```
+
+## Tolerance Landscape Visualization
+
+``` r
+
+# Thermal tolerance landscape (3D wireframe)
+# Survival probability across exposure temperature and duration,
+# based on the thermal death time (TDT) model of Rezende et al. (2014):
+#   T50(t)  = ctmax - z * log10(t / t_ref)
+#   S(T, t) = 1 / (1 + exp((T - T50(t)) / sigma))
+# Base R only; no packages needed.
+
+# Helper: which points on the surface can the viewer see? From each point we
+# step along the line of sight towards the eye; if that line passes through the
+# surface on the way, the point is hidden.
+visible_on_surface <- function(x, y, z, pm, f, xr, yr, steps = 400) {
+  # eye position in data coordinates: where the projection's x, y and w all vanish
+  eye <- solve(t(pm[1:3, c(1, 2, 4)]), -pm[4, c(1, 2, 4)])
+  s   <- seq(0, 1, length.out = steps)[-1]
+  vapply(seq_along(x), function(i) {
+    p  <- c(x[i], y[i], z[i])
+    rx <- p[1] + s * (eye[1] - p[1]); ry <- p[2] + s * (eye[2] - p[2])
+    rz <- p[3] + s * (eye[3] - p[3])
+    inside <- rx >= xr[1] & rx <= xr[2] & ry >= yr[1] & ry <= yr[2]
+    if (!any(inside)) return(TRUE)
+    h <- (rz - f(rx, ry))[inside]
+    !(any(h > 0) && any(h < 0))      # sign change = ray crosses the surface
+  }, logical(1))
+}
+
+# Helper: draw one labelled axis along a box edge, with ticks pointing away from
+# the box. Done by hand (instead of persp's own axes) so labels never collide
+# at the corners and stay inside the figure at small sizes.
+draw_axis_3d <- function(pm, p0, p1, at, labels, title, centre,
+                         tick = 0.05, lab_off = 0.09, gap = 0.08,
+                         cex_lab = 0.7, cex_title = 0.8) {
+  usr <- par("usr"); pin <- par("pin")
+  sx <- pin[1] / diff(usr[1:2]); sy <- pin[2] / diff(usr[3:4])    # user -> inches
+  pr <- function(p) { q <- trans3d(p[1], p[2], p[3], pm); c(q$x * sx, q$y * sy) }
+  a <- pr(p0); b <- pr(p1); m <- pr((p0 + p1) / 2); cc <- pr(centre)
+  d <- (b - a) / sqrt(sum((b - a)^2))
+  nrm <- c(-d[2], d[1]); if (sum(nrm * (m - cc)) < 0) nrm <- -nrm  # point outward
+  frac <- (at - p0[which(p0 != p1)]) / (p1 - p0)[which(p0 != p1)]
+  for (i in seq_along(at)) {
+    q  <- a + frac[i] * (b - a)
+    t1 <- q + nrm * tick; tl <- q + nrm * lab_off
+    segments(q[1] / sx, q[2] / sy, t1[1] / sx, t1[2] / sy, lwd = 0.6)
+    text(tl[1] / sx, tl[2] / sy, labels[i], cex = cex_lab,
+         adj = c(0.5 - 0.5 * nrm[1], 0.5 - 0.5 * nrm[2]))
+  }
+  # put the title just beyond the widest tick label, measured along the outward normal
+  w <- max(strwidth(labels, "inches", cex = cex_lab))
+  h <- max(strheight(labels, "inches", cex = cex_lab))
+  title_off <- lab_off + abs(nrm[1]) * w + abs(nrm[2]) * h + gap +
+    0.5 * strheight(title, "inches", cex = cex_title)
+  ang <- atan2(d[2], d[1]) * 180 / pi
+  if (ang > 90) ang <- ang - 180; if (ang < -90) ang <- ang + 180
+  tp <- m + nrm * title_off
+  text(tp[1] / sx, tp[2] / sy, title, srt = ang, cex = cex_title)
+}
+
+plot_tolerance_landscape_3d <- function(ctmax, z,
+                                        t_ref   = 1,          # minutes at which ctmax applies
+                                        sigma   = 0.15,       # width of survival transition (deg C)
+                                        t_range = c(1, 720),  # exposure range in minutes (1 min to 12 h)
+                                        n       = 50,         # mesh lines per axis
+                                        theta   = 130,        # viewing angles: rotate ...
+                                        phi     = 35,         # ... and tilt
+                                        tdt_col = "#c2410c") { # colour of the survival-limit line
+  t50  <- function(t) ctmax - z * log10(t / t_ref)
+  pad  <- max(6 * sigma, 1)
+  temp <- seq(min(t50(t_range)) - pad, max(t50(t_range)) + 1.5 * pad, length.out = n)
+  time <- seq(t_range[1], t_range[2], length.out = n) / 60          # hours
+  surv <- outer(time, temp, function(h, T) plogis((t50(h * 60) - T) / sigma))
+  
+  op <- par(mar = c(1.2, 1.6, 0.4, 0.4), xpd = NA); on.exit(par(op))
+  pm <- persp(time, temp, surv,
+              theta = theta, phi = phi, expand = 0.6, scale = TRUE,
+              col = "white", border = "white", lwd = 0.1,
+              shade = 0.5, ltheta = -120,
+              box = TRUE, axes = FALSE, zlim = c(0, 1))
+  
+  # Axes: each goes on the box edge nearest the viewer's lower left/right
+  xr <- range(time); yr <- range(temp); zr <- c(0, 1)
+  centre <- c(mean(xr), mean(yr), mean(zr))
+  scr <- function(x, y, z) { q <- trans3d(x, y, z, pm); c(q$x, q$y) }
+  # time axis: the lower of the two bottom edges running along time
+  yt <- yr[which.min(sapply(yr, function(y) scr(mean(xr), y, 0)[2]))]
+  # temperature axis: the lower of the two bottom edges running along temperature
+  xt <- xr[which.min(sapply(xr, function(x) scr(x, mean(yr), 0)[2]))]
+  # survival axis: the left-most vertical edge
+  corners <- expand.grid(x = xr, y = yr)
+  k <- which.min(mapply(function(x, y) scr(x, y, 0)[1], corners$x, corners$y))
+  
+  # skip ticks within 8% of an axis end, so labels don't pile up at the corners
+  inner <- function(r, n = 5) { b <- pretty(r, n); e <- 0.08 * diff(r)
+  b[b > r[1] + e & b < r[2] - e] }
+  bt <- inner(xr); btemp <- inner(yr); bz <- seq(0.2, 1, by = 0.2)
+  draw_axis_3d(pm, c(xr[1], yt, 0), c(xr[2], yt, 0), bt, bt,
+               "Exposure duration (h)", centre)
+  draw_axis_3d(pm, c(xt, yr[1], 0), c(xt, yr[2], 0), btemp, btemp,
+               "Temperature (\u00b0C)", centre)
+  draw_axis_3d(pm, c(corners$x[k], corners$y[k], 0), c(corners$x[k], corners$y[k], 1),
+               bz, format(bz), "Survival probability", centre)
+  
+  # Survival limit (TDT curve): temperature-duration combinations giving 50% survival.
+  # Segments hidden behind the surface are left out.
+  hh  <- 10^seq(log10(t_range[1]), log10(t_range[2]), length.out = 400) / 60
+  vis <- visible_on_surface(hh, t50(hh * 60), rep(0.5, length(hh)), pm,
+                            function(h, T) plogis((t50(h * 60) - T) / sigma),
+                            range(time), range(temp))
+  pts <- trans3d(hh, t50(hh * 60), 0.5, pm)
+  pts$x[!vis] <- NA
+  lines(pts, col = tdt_col, lwd = 2)
+  legend("topright", legend = "50% survival limit",
+         col = tdt_col, lwd = 2, bty = "n", cex = 0.7, seg.len = 1.5, inset = c(0, -0.02))
+  invisible(pm)
+}
+
+# Example
+plot_tolerance_landscape_3d(ctmax = parameters$ctmax[2], z = parameters$z[2])
+```
+
+<img src="../Figures/markdown/TTL-3d-1.png" style="display: block; margin: auto;" />
 
 ## Mortality under variable temperatures
 
@@ -409,13 +535,13 @@ warmest_week_daily
 ## # A tibble: 7 × 5
 ##   date       mean_temp min_temp max_temp     n
 ##   <date>         <dbl>    <dbl>    <dbl> <int>
-## 1 2026-05-17      21.7     15.4     29.5  1440
-## 2 2026-05-18      22.9     17       30.8  1440
-## 3 2026-05-19      24.8     18.2     33.8  1440
-## 4 2026-05-20      26.0     20.9     34.3  1440
-## 5 2026-05-21      21.4     17.4     27.3  1440
-## 6 2026-05-22      20.0     14.6     27.5  1440
-## 7 2026-05-23      18.9     15.3     22.8  1440
+## 1 2026-05-17      19.2     12.9     27.0  1440
+## 2 2026-05-18      20.4     14.5     28.3  1440
+## 3 2026-05-19      22.3     15.7     31.3  1440
+## 4 2026-05-20      23.5     18.4     31.8  1440
+## 5 2026-05-21      18.9     14.9     24.8  1440
+## 6 2026-05-22      17.5     12.1     25.0  1440
+## 7 2026-05-23      16.4     12.8     20.3  1440
 
 warmest_week_summary <- warmest_week_daily |>
   summarise(
@@ -431,7 +557,7 @@ warmest_week_summary
 ## # A tibble: 1 × 6
 ##   week_start week_end   mean_temp_week mean_daily_range min_daily_range max_daily_range
 ##   <date>     <date>              <dbl>            <dbl>           <dbl>           <dbl>
-## 1 2026-05-17 2026-05-23           22.2             12.5            7.55            15.6
+## 1 2026-05-17 2026-05-23           19.7             12.5            7.55            15.6
 
 
 warmest_week_daily |>
@@ -439,13 +565,13 @@ warmest_week_daily |>
 ## # A tibble: 7 × 6
 ##   date       mean_temp min_temp max_temp     n daily_range
 ##   <date>         <dbl>    <dbl>    <dbl> <int>       <dbl>
-## 1 2026-05-17      21.7     15.4     29.5  1440       14.1 
-## 2 2026-05-18      22.9     17       30.8  1440       13.8 
-## 3 2026-05-19      24.8     18.2     33.8  1440       15.6 
-## 4 2026-05-20      26.0     20.9     34.3  1440       13.5 
-## 5 2026-05-21      21.4     17.4     27.3  1440        9.86
-## 6 2026-05-22      20.0     14.6     27.5  1440       12.8 
-## 7 2026-05-23      18.9     15.3     22.8  1440        7.55
+## 1 2026-05-17      19.2     12.9     27.0  1440       14.1 
+## 2 2026-05-18      20.4     14.5     28.3  1440       13.8 
+## 3 2026-05-19      22.3     15.7     31.3  1440       15.6 
+## 4 2026-05-20      23.5     18.4     31.8  1440       13.5 
+## 5 2026-05-21      18.9     14.9     24.8  1440        9.86
+## 6 2026-05-22      17.5     12.1     25.0  1440       12.8 
+## 7 2026-05-23      16.4     12.8     20.3  1440        7.55
 
 warmest_week_summary |> select(mean_daily_range, min_daily_range, max_daily_range)
 ## # A tibble: 1 × 3
@@ -514,7 +640,7 @@ mortality increases.
 ``` r
 
 sim_week_warm <- simulate_temp_week(
-  mean_temp = warmest_week_summary$mean_temp_week + 6,
+  mean_temp = warmest_week_summary$mean_temp_week + 8,
   daily_range = warmest_week_summary$mean_daily_range
 )
 
