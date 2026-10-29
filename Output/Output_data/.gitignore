@@ -3,3 +3,6 @@
 .RData
 .Ruserdata
 .DS_Store
+
+# Cached brms model fit (regenerated automatically by report.Rmd)
+ttl_aft_brms_fit.rds

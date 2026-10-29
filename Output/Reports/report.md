@@ -2,346 +2,544 @@ Thermal Tolerance Landscapes of *Skistodiaptomus pallidus*
 ================
 2026-10-29
 
+- [Data overview](#data-overview)
 - [Building the survival dataset](#building-the-survival-dataset)
-- [All data](#all-data)
-- [Just temperatures above 33°C](#just-temperatures-above-33c)
-- [Tolerance Landscape Parameters](#tolerance-landscape-parameters)
-- [Dynamic Landscapes](#dynamic-landscapes)
-- [Tolerance Landscape
-  Visualization](#tolerance-landscape-visualization)
+- [Per-run LT50 values](#per-run-lt50-values)
+- [Individual-level AFT model](#individual-level-aft-model)
+  - [Linearity check](#linearity-check)
+- [Tolerance landscape parameters](#tolerance-landscape-parameters)
+  - [Population differences](#population-differences)
+- [Tolerance landscape
+  visualization](#tolerance-landscape-visualization)
 - [Mortality under variable
   temperatures](#mortality-under-variable-temperatures)
-  - [Example 1](#example-1)
+  - [Example 1: Cheney Reservoir,
+    Kansas](#example-1-cheney-reservoir-kansas)
   - [Example 2](#example-2)
-
-When setting up the experiments, there is often a slight offset between
-the temperature observed in the wells and the set temperature of the
-water bath. For these analyses, we will use the temperature read from
-the water bath, not the set temperature.
+- [Session info](#session-info)
 
 ``` r
+# Reference (centring) temperature for the models. CTmax and z do not depend on
+# this choice; it only makes the intercepts interpretable (log survival time at
+# temp_center) and reduces the correlation between intercept and slope.
+temp_center = 34.5
 
-raw_data |> 
-  select(set_temp_c, read_temp_c) |> 
-  distinct() |> 
-  ggplot(aes(x = set_temp_c, y = read_temp_c)) + 
-  geom_abline(intercept = 0, slope = 1) + 
-  geom_point() + 
+# Runs observed for less than this many minutes cannot show whether loss of
+# movement was final (recoveries in longer runs happened tens of minutes to
+# hours after animals stopped moving). They are kept, but flagged.
+min_watch_min = 60
+
+pop_colours = c(BRNY = "#4C78A8", CPCO = "#F58518", CPCT = "#54A24B",
+                HPPA = "#B279A2", LLPA = "#E45756", OPOH = "#72B7B2")
+```
+
+## Data overview
+
+All runs used here follow the current assay protocol (runs on or before
+2026-10-08 used an earlier protocol and are excluded in
+`00_controller.R`). Animals are added to wells already holding at the
+target temperature, background mortality at benign temperatures is zero,
+and all cultures have been held in common garden for more than three
+generations.
+
+The temperature read in the wells is lower than the bath set point, so
+the read temperature (`read_temp_c`) is used throughout.
+
+``` r
+raw_data |>
+  distinct(run_id, set_temp_c, read_temp_c) |>
+  ggplot(aes(x = set_temp_c, y = read_temp_c)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed") +
+  geom_point(size = 3) +
+  labs(x = "Set temperature (°C)", y = "Read temperature (°C)") +
   theme_matt()
 ```
 
-<img src="../Figures/markdown/unnamed-chunk-1-1.png" style="display: block; margin: auto;" />
+<img src="../Figures/markdown/set-vs-read-1.png" style="display: block; margin: auto;" />
 
-The number of observations at each temperature for each population is
-shown below.
+Each run is one water bath on one day at one temperature, and the run
+(not the individual) is the unit of replication for temperature effects.
 
 ``` r
+run_table = raw_data |>
+  group_by(run_id, experiment_date, water_bath_id, read_temp_c) |>
+  summarise(populations = paste(sort(unique(population)), collapse = ", "),
+            n_animals = n_distinct(paste(population, well_id)),
+            watched_min = max(timepoint_min),
+            .groups = "drop") |>
+  mutate(short_run = watched_min < min_watch_min) |>
+  arrange(read_temp_c)
 
-raw_data |> group_by(source_file) |> 
-  count(population, read_temp_c) |> 
-  ggplot(aes(x = read_temp_c, y = n)) + 
-  facet_wrap(population~.) + 
-  geom_bar(stat = "identity")
+knitr::kable(run_table, caption = "Runs included in the analysis. `short_run` = watched for less than the minimum time needed to confirm that loss of movement was final.")
 ```
 
-<img src="../Figures/markdown/unnamed-chunk-2-1.png" style="display: block; margin: auto;" />
+| run_id | experiment_date | water_bath_id | read_temp_c | populations | n_animals | watched_min | short_run |
+|:---|:---|:---|---:|:---|---:|---:|:---|
+| 2026-10-20_WB-1 | 2026-10-20 | WB-1 | 34.0 | CPCO, OPOH | 20 | 905 | FALSE |
+| 2026-10-20_WB-2 | 2026-10-20 | WB-2 | 34.2 | CPCO, OPOH | 20 | 890 | FALSE |
+| 2026-10-25_WB-3 | 2026-10-25 | WB-3 | 34.3 | BRNY, CPCT, HPPA, LLPA | 20 | 720 | FALSE |
+| 2026-10-09_WB-1 | 2026-10-09 | WB-1 | 34.4 | CPCO, OPOH | 20 | 30 | TRUE |
+| 2026-10-11_WB-2 | 2026-10-11 | WB-2 | 34.5 | CPCO, OPOH | 20 | 722 | FALSE |
+| 2026-10-22_WB-2 | 2026-10-22 | WB-2 | 34.5 | BRNY, CPCT, HPPA, LLPA | 20 | 360 | FALSE |
+| 2026-10-13_WB-1 | 2026-10-13 | WB-1 | 34.7 | CPCO, OPOH | 20 | 30 | TRUE |
+| 2026-10-25_WB-1 | 2026-10-25 | WB-1 | 34.7 | BRNY, CPCT, HPPA, LLPA | 20 | 15 | TRUE |
+| 2026-10-20_WB-3 | 2026-10-20 | WB-3 | 34.8 | CPCO, OPOH | 20 | 30 | TRUE |
+| 2026-10-13_WB-3 | 2026-10-13 | WB-3 | 34.9 | CPCO, OPOH | 20 | 5 | TRUE |
+| 2026-10-22_WB-3 | 2026-10-22 | WB-3 | 34.9 | BRNY, CPCT, HPPA, LLPA | 20 | 48 | TRUE |
+
+Runs included in the analysis. `short_run` = watched for less than the
+minimum time needed to confirm that loss of movement was final.
 
 ## Building the survival dataset
 
-Individuals are checked for survival at regular intervals during the
-experiments. In the resulting data, `responding == "no"` indicates
-death: the death time is the first timepoint at which an individual is
-recorded as not responding, or, if it never stops responding, the last
-observed timepoint (right-censored). Rows flagged for data-quality
-issues (`flagged == "yes"`) are excluded before constructing the
-time-to-event record for each individual. The actual measured bath
-temperature (`read_temp_c`) is used as the temperature covariate rather
-than the nominal `set_temp_c`, since the two diverge noticeably at
-higher target temperatures.
+**Endpoint: final loss of movement.** Some animals stop responding and
+later recover, so the first non-responding check is not treated as
+death. For each individual:
+
+- *Died* if it was not responding at the last check. Death occurred
+  after the last check at which it was responding (`lower`) and at or
+  before the next check (`upper`): an **interval-censored** time.
+  Animals never seen responding have `lower = 0` (left-censored).
+- *Survived* (right-censored at the end of the run) if it was responding
+  at the last check.
+
+Individuals that were already not responding at a 0-min check and never
+responded afterwards are excluded as dead before exposure. Rows flagged
+in the logger (`flagged == "yes"`) are mostly animals that recovered
+after a period of non-response; they are kept, because the endpoint
+definition above already handles recovery.
+
+``` r
+surv_data = raw_data |>
+  arrange(run_id, well_id, timepoint_min) |>
+  group_by(run_id, source_file, experiment_date, water_bath_id, read_temp_c, well_id, population) |>
+  summarise(
+    dead_at_start = !any(responding == "yes") & min(timepoint_min) == 0,
+    final_no      = last(responding) == "no",
+    last_yes      = if (any(responding == "yes")) max(timepoint_min[responding == "yes"]) else 0,
+    upper         = if (final_no) min(timepoint_min[timepoint_min > last_yes]) else NA_real_,
+    recovered     = any(responding == "no" & timepoint_min < last_yes),
+    flagged       = any(flagged == "yes", na.rm = TRUE),
+    watched_min   = max(timepoint_min),
+    .groups = "drop") |>
+  filter(!dead_at_start) |>
+  mutate(
+    event   = as.integer(final_no),
+    lower   = if_else(final_no, last_yes, watched_min),   # 0 = left-censored
+    # survreg coding (interval2): NA lower = left-censored, NA upper = right-censored
+    sr_lower = if_else(lower == 0, NA_real_, lower),
+    # brms coding
+    cens = case_when(!final_no ~ "right", lower == 0 ~ "left", TRUE ~ "interval"),
+    y    = if_else(cens == "left", upper, lower),
+    y2   = if_else(cens == "interval", upper, NA_real_),
+    temp_c = read_temp_c - temp_center,
+    population = factor(population),
+    run_id = factor(run_id))
+
+surv_data |>
+  summarise(individuals = n(), died = sum(event), right_censored = sum(cens == "right"),
+            left_censored = sum(cens == "left"), recovered_after_non_response = sum(recovered),
+            flagged = sum(flagged)) |>
+  knitr::kable()
+```
+
+| individuals | died | right_censored | left_censored | recovered_after_non_response | flagged |
+|---:|---:|---:|---:|---:|---:|
+| 218 | 209 | 9 | 24 | 41 | 39 |
+
+## Per-run LT50 values
+
+As a transparent view of the data, the LT50 of each population in each
+run is estimated from an intercept-only interval-censored AFT model
+(log-normal, matching the main model below), and log10(LT50) is
+regressed on temperature for each population, as in Rezende et
+al. (2020). This figure is descriptive: the parameter estimates come
+from the individual-level model in the next section.
+
+``` r
+lt50_runs = surv_data |>
+  group_by(population, run_id, read_temp_c) |>
+  group_modify(\(d, k) {
+    m = survreg(Surv(sr_lower, upper, type = "interval2") ~ 1, data = d, dist = "lognormal")
+    tibble(n = nrow(d),
+           n_died = sum(d$event),
+           log_lt50 = unname(coef(m)[1]),
+           se_log = sqrt(vcov(m)[1, 1]),
+           watched_min = max(d$watched_min))
+  }) |>
+  ungroup() |>
+  mutate(lt50 = exp(log_lt50),
+         lwr = exp(log_lt50 - 1.96 * se_log),
+         upr = exp(log_lt50 + 1.96 * se_log),
+         # LT50 beyond the end of the run is an extrapolation along the fitted curve
+         basis = if_else(lt50 > watched_min, "Beyond end of run", "Within observed time"))
+
+lt50_fits = lt50_runs |>
+  group_by(population) |>
+  group_modify(\(d, k) {
+    m = lm(log10(lt50) ~ read_temp_c, data = d)
+    tibble(n_runs = nrow(d),
+           ctmax = -coef(m)[[1]] / coef(m)[[2]],
+           z = -1 / coef(m)[[2]],
+           r2 = summary(m)$r.squared)
+  }) |>
+  ungroup()
+
+# Label the shortest LT50 (in minutes) and the longest LT50 (in hours) in each panel
+lt50_extremes = lt50_runs |>
+  group_by(population) |>
+  filter(lt50 == min(lt50) | lt50 == max(lt50)) |>
+  mutate(which = if_else(lt50 == min(lt50), "shortest", "longest"),
+         label = if_else(which == "shortest",
+                         sprintf("%.1f min", lt50),
+                         sprintf("%.1f h", lt50 / 60)),
+         # shortest LT50s sit at the hot (right) end, so push their labels down-left; longest up-right
+         nudge_x = if_else(which == "shortest", -0.12, 0.12),
+         nudge_y = if_else(which == "shortest", -0.45, 0.45)) |>
+  ungroup()
+
+ggplot(lt50_runs, aes(x = read_temp_c, y = lt50, colour = population)) +
+  facet_wrap(~ population) +
+  geom_smooth(method = "lm", formula = y ~ x, se = TRUE, alpha = 0.15, linewidth = 1) +
+  geom_errorbar(aes(ymin = lwr, ymax = upr), width = 0, alpha = 0.5) +
+  geom_point(aes(shape = basis), size = 3, fill = "white", stroke = 1.2) +
+  ggrepel::geom_label_repel(data = lt50_extremes, aes(label = label),
+                            nudge_x = lt50_extremes$nudge_x, nudge_y = lt50_extremes$nudge_y,
+                            size = 3, fill = "white", label.size = 0, label.padding = 0.15,
+                            min.segment.length = 0, segment.size = 0.3, seed = 42,
+                            show.legend = FALSE) +
+  scale_y_log10(labels = scales::label_comma(), breaks = 10^(-1:4)) +
+  coord_cartesian(ylim = c(0.2, 5000)) +   # keeps wide regression ribbons from stretching the axis
+  scale_shape_manual(values = c("Within observed time" = 16, "Beyond end of run" = 21), name = NULL) +
+  scale_colour_manual(values = pop_colours, guide = "none") +
+  labs(x = "Read temperature (°C)", y = "LT50 (min, log scale)") +
+  theme_matt_facets(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+
+<img src="../Figures/markdown/per-run-lt50-1.png" style="display: block; margin: auto;" />
 
 ``` r
 
-surv_data = raw_data |>
-  #filter(flagged != "yes" | is.na(flagged)) |>
-  arrange(source_file, water_bath_id, stopwatch_start_time, well_id, timepoint_min) |>
-  group_by(source_file, experiment_date, water_bath_id, stopwatch_start_time, well_id, population, read_temp_c) |>
-  summarise(
-    time = if (any(responding == "no")) min(timepoint_min[responding == "no"]) else max(timepoint_min),
-    event = as.integer(any(responding == "no")),
-    n_obs = n(),
-    .groups = "drop"
-  ) |> 
-  filter(time != 0)
-
-surv_data
-## # A tibble: 218 × 10
-##    source_file experiment_date water_bath_id stopwatch_start_time well_id population read_temp_c  time event n_obs
-##          <int> <date>          <chr>         <dttm>               <chr>   <chr>            <dbl> <dbl> <int> <int>
-##  1           8 2026-10-09      WB-1          2026-10-09 13:25:09  A1      OPOH              34.4    10     1     6
-##  2           8 2026-10-09      WB-1          2026-10-09 13:25:09  A2      OPOH              34.4    15     1     6
-##  3           8 2026-10-09      WB-1          2026-10-09 13:25:09  A3      OPOH              34.4     6     1     6
-##  4           8 2026-10-09      WB-1          2026-10-09 13:25:09  A4      CPCO              34.4     6     1     6
-##  5           8 2026-10-09      WB-1          2026-10-09 13:25:09  A5      OPOH              34.4     3     1     6
-##  6           8 2026-10-09      WB-1          2026-10-09 13:25:09  B1      CPCO              34.4    10     1     6
-##  7           8 2026-10-09      WB-1          2026-10-09 13:25:09  B2      OPOH              34.4    15     1     6
-##  8           8 2026-10-09      WB-1          2026-10-09 13:25:09  B3      OPOH              34.4    30     1     6
-##  9           8 2026-10-09      WB-1          2026-10-09 13:25:09  B4      CPCO              34.4    10     1     6
-## 10           8 2026-10-09      WB-1          2026-10-09 13:25:09  B5      CPCO              34.4     3     1     6
-## # ℹ 208 more rows
+knitr::kable(lt50_fits, digits = 2,
+             caption = "Two-stage (per-run LT50) regressions, for comparison only. z is in log10 units (°C per 10-fold change in LT50).")
 ```
 
-## All data
+| population | n_runs | ctmax |    z |   r2 |
+|:-----------|-------:|------:|-----:|-----:|
+| BRNY       |      4 | 34.81 | 0.30 | 0.99 |
+| CPCO       |      7 | 34.94 | 0.41 | 0.75 |
+| CPCT       |      4 | 34.85 | 0.34 | 0.69 |
+| HPPA       |      4 | 34.90 | 0.23 | 0.83 |
+| LLPA       |      4 | 34.94 | 0.25 | 0.88 |
+| OPOH       |      7 | 34.97 | 0.44 | 0.90 |
 
-Individual survival times are modeled jointly across all temperatures
-using an accelerated failure time (AFT) model, rather than fitting
-separate Kaplan-Meier curves per temperature, since many
-temperature/population cells have only 10 individuals. Weibull,
-log-normal, and log-logistic distributions are compared by AIC.
+Two-stage (per-run LT50) regressions, for comparison only. z is in log10
+units (°C per 10-fold change in LT50).
+
+Labels give the shortest (minutes) and longest (hours) LT50 for each
+population. Across all populations, run LT50s range from 0.5 min (BRNY,
+34.9 °C) to 24.3 h (HPPA, 34.3 °C), although the longest falls after the
+end of its run.
+
+Open symbols are LT50s that fall after the run ended. They come from the
+fitted curve shape rather than observed deaths and should be read with
+caution. The populations added on 2026-10-22 have five animals per run,
+so their per-run LT50s are imprecise.
+
+## Individual-level AFT model
+
+The parameter estimates come from an accelerated failure time (AFT)
+model fitted to individual, interval-censored survival times:
+
+$$\log(T_{ij}) = \beta_{0,p} + \beta_{1,p}\,(T_{\text{read}} - 34.5) + u_{\text{run}} + \sigma\,\varepsilon_{ij}$$
+
+- Each population $p$ has its own intercept and temperature slope
+  (`0 + population + population:temp_c`).
+- $u_{\text{run}} \sim N(0, \sigma_{\text{run}})$ is a random effect for
+  run (bath × day), so runs rather than individuals are the replicates
+  for the temperature slope.
+- $\varepsilon$ is standard normal (log-normal survival times).
+  Log-normal, log-logistic and Weibull fit about equally well under this
+  endpoint (below), and the log-normal is the natural choice in `brms`.
 
 ``` r
 dists = c("weibull", "lognormal", "loglogistic")
 
-aic_table = map_dfr(dists, function(d) {
-  m = survreg(Surv(time, event) ~ population * read_temp_c, data = surv_data, dist = d)
-  tibble(dist = d, AIC = AIC(m), logLik = as.numeric(logLik(m)))
+map_dfr(dists, \(d) {
+  m = survreg(Surv(sr_lower, upper, type = "interval2") ~ population * temp_c, data = surv_data, dist = d)
+  tibble(dist = d, AIC = AIC(m))
+}) |>
+  mutate(delta_AIC = AIC - min(AIC)) |>
+  knitr::kable(digits = 1, caption = "Distribution comparison (fixed-effects survreg models, no run effect).")
+```
+
+| dist        |    AIC | delta_AIC |
+|:------------|-------:|----------:|
+| weibull     | 1029.3 |       2.1 |
+| lognormal   | 1030.4 |       3.2 |
+| loglogistic | 1027.2 |       0.0 |
+
+Distribution comparison (fixed-effects survreg models, no run effect).
+
+``` r
+aft_fit = brm(
+  y | cens(cens, y2) ~ 0 + population + population:temp_c + (1 | run_id),
+  data = surv_data,
+  family = lognormal(),
+  chains = 4, cores = 4, iter = 4000, seed = 6053,
+  refresh = 0, silent = 2,
+  file = "../Output_data/ttl_aft_brms_fit",   # cached; refits automatically when data or model change
+  file_refit = "on_change")
+
+summary(aft_fit)
+##  Family: lognormal 
+##   Links: mu = identity 
+## Formula: y | cens(cens, y2) ~ 0 + population + population:temp_c + (1 | run_id) 
+##    Data: surv_data (Number of observations: 218) 
+##   Draws: 4 chains, each with iter = 4000; warmup = 2000; thin = 1;
+##          total post-warmup draws = 8000
+## 
+## Multilevel Hyperparameters:
+## ~run_id (Number of levels: 11) 
+##               Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+## sd(Intercept)     0.95      0.37     0.46     1.89 1.00     1897     2426
+## 
+## Regression Coefficients:
+##                       Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+## populationBRNY            2.45      0.67     1.11     3.80 1.00     3860     3549
+## populationCPCO            2.51      0.43     1.67     3.39 1.00     3825     3801
+## populationCPCT            2.38      0.67     1.04     3.70 1.00     3885     3386
+## populationHPPA            3.29      0.67     1.98     4.62 1.00     3758     4058
+## populationLLPA            4.24      0.68     2.90     5.59 1.00     3632     3680
+## populationOPOH            2.45      0.44     1.58     3.30 1.00     3972     3912
+## populationBRNY:temp_c    -6.51      2.78   -11.93    -0.96 1.00     4045     4313
+## populationCPCO:temp_c    -5.78      1.43    -8.62    -2.95 1.00     3521     3523
+## populationCPCT:temp_c    -7.10      2.77   -12.45    -1.54 1.00     4021     3959
+## populationHPPA:temp_c    -7.33      2.77   -12.78    -1.82 1.00     3925     4233
+## populationLLPA:temp_c   -10.16      2.83   -15.67    -4.60 1.00     3462     4083
+## populationOPOH:temp_c    -5.32      1.44    -8.21    -2.42 1.00     3582     3270
+## 
+## Further Distributional Parameters:
+##       Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+## sigma     1.56      0.09     1.40     1.76 1.00     7216     5245
+## 
+## Draws were sampled using sample(hmc). For each parameter, Bulk_ESS
+## and Tail_ESS are effective sample size measures, and Rhat is the potential
+## scale reduction factor on split chains (at convergence, Rhat = 1).
+```
+
+Check that all `Rhat` values are ≤ 1.01 and effective sample sizes are
+in the hundreds or more before using the estimates.
+
+The run-to-run standard deviation, σ<sub>run</sub> = 0.95 on the
+natural-log scale, means that two runs at the same temperature typically
+differ in median survival time by a factor of about 2.6. This variation
+is why individuals within a run cannot be treated as independent
+replicates.
+
+### Linearity check
+
+The tolerance landscape assumes that log survival time declines linearly
+with temperature. The per-run LT50s suggest a sharp drop between about
+34.3 and 34.5 °C. A quick test with a fixed-effects model (no run
+effect, so p-values are anti-conservative):
+
+``` r
+lin  = survreg(Surv(sr_lower, upper, type = "interval2") ~ population + temp_c, data = surv_data, dist = "lognormal")
+quad = survreg(Surv(sr_lower, upper, type = "interval2") ~ population + poly(temp_c, 2), data = surv_data, dist = "lognormal")
+anova(lin, quad)
+##                          Terms Resid. Df    -2*LL Test Df Deviance     Pr(>Chi)
+## 1          population + temp_c       210 1012.155      NA       NA           NA
+## 2 population + poly(temp_c, 2)       209 1001.260    =  1  10.8949 0.0009642962
+```
+
+If the curvature persists once runs below 34 °C are added, a single
+CTmax and z will not describe the landscape well. A breakpoint or smooth
+temperature effect would then be needed.
+
+## Tolerance landscape parameters
+
+For each population, CTmax (temperature giving a 1-min LT50) and z (°C
+per 10-fold change in survival time, log10 units as in Rezende et al.)
+are computed from every posterior draw of the population-level
+coefficients. The run effect is treated as experimental noise and not
+added to the survival curves. Temperatures giving LT50s of 10 min, 1 h
+and 12 h are reported too: they lie within or near the tested range and
+are less sensitive to extrapolation than CTmax.
+
+``` r
+pops = levels(surv_data$population)
+
+ttls = map(set_names(pops), \(p) brms_ttl(aft_fit, population = p, temp_center = temp_center))
+
+fmt_ci = function(est, lo, hi, digits = 2) sprintf(paste0("%.", digits, "f [%.", digits, "f, %.", digits, "f]"), est, lo, hi)
+
+ttl_table = imap_dfr(ttls, \(tl, p) {
+  lt = tl$lt_temps
+  tibble(population = p,
+         n_runs = n_distinct(surv_data$run_id[surv_data$population == p]),
+         n_animals = sum(surv_data$population == p),
+         CTmax = fmt_ci(tl$ctmax, tl$ctmax.ci[1], tl$ctmax.ci[2]),
+         z = fmt_ci(tl$z, tl$z.ci[1], tl$z.ci[2]),
+         `T (LT50 = 10 min)` = fmt_ci(lt$temp[1], lt$lwr[1], lt$upr[1]),
+         `T (LT50 = 1 h)` = fmt_ci(lt$temp[2], lt$lwr[2], lt$upr[2]),
+         `T (LT50 = 12 h)` = fmt_ci(lt$temp[3], lt$lwr[3], lt$upr[3]))
 })
 
-aic_table
-## # A tibble: 3 × 3
-##   dist          AIC logLik
-##   <chr>       <dbl>  <dbl>
-## 1 weibull     1693.  -833.
-## 2 lognormal   1596.  -785.
-## 3 loglogistic 1566.  -770.
+knitr::kable(ttl_table, caption = "Tolerance landscape parameters (posterior median [95% credible interval]). Temperatures in °C; z in °C per 10-fold change in survival time.")
 ```
 
-The log-logistic distribution has the lowest AIC. While a likelihood
-ratio test comparing models with and without a population × temperature
-interaction shows the interaction is not supported over the full
-temperature range, we are using a model that includes the interaction
-between temperature and population. The terms from this model are
-included in the table below.
+| population | n_runs | n_animals | CTmax | z | T (LT50 = 10 min) | T (LT50 = 1 h) | T (LT50 = 12 h) |
+|:---|---:|---:|:---|:---|:---|:---|:---|
+| BRNY | 4 | 20 | 34.87 \[34.65, 35.81\] | 0.35 \[0.18, 1.50\] | 34.52 \[34.09, 34.78\] | 34.25 \[33.04, 34.49\] | 33.87 \[31.48, 34.26\] |
+| CPCO | 7 | 70 | 34.93 \[34.75, 35.39\] | 0.40 \[0.27, 0.78\] | 34.54 \[34.37, 34.72\] | 34.23 \[33.89, 34.39\] | 33.79 \[33.08, 34.06\] |
+| CPCT | 4 | 20 | 34.84 \[34.65, 35.52\] | 0.32 \[0.18, 1.17\] | 34.51 \[34.10, 34.71\] | 34.26 \[33.27, 34.48\] | 33.91 \[32.03, 34.26\] |
+| HPPA | 4 | 20 | 34.95 \[34.74, 35.85\] | 0.31 \[0.17, 1.06\] | 34.63 \[34.42, 34.91\] | 34.39 \[33.81, 34.57\] | 34.05 \[32.78, 34.33\] |
+| LLPA | 4 | 18 | 34.92 \[34.77, 35.33\] | 0.23 \[0.15, 0.50\] | 34.69 \[34.57, 34.89\] | 34.51 \[34.32, 34.64\] | 34.27 \[33.83, 34.42\] |
+| OPOH | 7 | 70 | 34.96 \[34.75, 35.51\] | 0.43 \[0.28, 0.93\] | 34.53 \[34.34, 34.72\] | 34.19 \[33.76, 34.37\] | 33.72 \[32.79, 34.04\] |
+
+Tolerance landscape parameters (posterior median \[95% credible
+interval\]). Temperatures in °C; z in °C per 10-fold change in survival
+time.
+
+``` r
+ttl_long = imap_dfr(ttls, \(tl, p) {
+  d = tl$draws
+  tibble(population = p,
+         parameter = rep(c("CTmax (°C)", "z (°C)", "T at LT50 = 1 h (°C)"), each = nrow(d)),
+         value = c(d$ctmax, d$z, temp_center + (log(60) - d$beta0) / d$slope))
+}) |>
+  group_by(population, parameter) |>
+  summarise(est = median(value), lwr = quantile(value, 0.025), upr = quantile(value, 0.975),
+            lwr50 = quantile(value, 0.25), upr50 = quantile(value, 0.75), .groups = "drop")
+
+ggplot(ttl_long, aes(y = population, x = est, colour = population)) +
+  facet_wrap(~ parameter, scales = "free_x") +
+  geom_linerange(aes(xmin = lwr, xmax = upr), linewidth = 0.8) +
+  geom_linerange(aes(xmin = lwr50, xmax = upr50), linewidth = 2.5) +
+  geom_point(size = 3, colour = "white", stroke = 1.2, shape = 21, aes(fill = population)) +
+  scale_colour_manual(values = pop_colours, guide = "none") +
+  scale_fill_manual(values = pop_colours, guide = "none") +
+  labs(x = NULL, y = NULL) +
+  theme_matt_facets(base_size = 12)
+```
+
+<img src="../Figures/markdown/ttl-forest-1.png" style="display: block; margin: auto;" />
+
+Thick bars show 50% and thin bars 95% credible intervals. For
+comparison, published z values for insects, bivalves, fishes and
+crustaceans are mostly about 1–9 °C (Rezende et al. 2014).
+
+### Population differences
+
+All pairwise differences between populations are computed from the same
+posterior draws, so each contrast carries the full uncertainty in both
+populations’ parameters (including their correlation through the shared
+run effects).
+
+Populations tested in the same runs are compared within runs
+(**paired**). So far that covers CPCO with OPOH, and the pairs among
+BRNY, CPCT, HPPA and LLPA. Pairs from different sets of runs
+(**unpaired**) rely on the run random effect to separate population from
+run differences. They are less precise, and they assume the two sets of
+runs are comparable apart from population. Adding runs that mix the two
+groups would turn these into paired comparisons.
+
+``` r
+t60 = \(d) temp_center + (log(60) - d$beta0) / d$slope   # temperature giving a 1-h LT50
+
+# Runs each population appears in, to flag which pairs share runs
+pop_runs = surv_data |> 
+  distinct(population, run_id) |> 
+  group_by(population) |> 
+  summarise(runs = list(as.character(run_id)), .groups = "drop") |> 
+  deframe()
+
+contrast_levels = c("CTmax (°C)", "z (°C)", "T at LT50 = 1 h (°C)")
+
+contrast_draws = function(p1, p2) {
+  a = ttls[[p1]]$draws; b = ttls[[p2]]$draws
+  tibble(parameter = factor(contrast_levels, levels = contrast_levels),
+         diff = list(a$ctmax - b$ctmax, a$z - b$z, t60(a) - t60(b))) |> 
+    mutate(contrast = paste(p1, "-", p2),   # ASCII hyphen: a Unicode minus breaks the PDF figures
+           design = if_else(length(intersect(pop_runs[[p1]], pop_runs[[p2]])) > 0, "Paired", "Unpaired"),
+           estimate = map_dbl(diff, median),
+           lwr = map_dbl(diff, quantile, 0.025),
+           upr = map_dbl(diff, quantile, 0.975),
+           lwr50 = map_dbl(diff, quantile, 0.25),
+           upr50 = map_dbl(diff, quantile, 0.75),
+           p_gt0 = map_dbl(diff, \(x) mean(x > 0))) |> 
+    select(-diff)
+}
+
+all_contrasts = combn(pops, 2, simplify = FALSE) |> 
+  map_dfr(\(pr) contrast_draws(pr[1], pr[2])) |> 
+  arrange(desc(design == "Paired"), contrast) |> 
+  mutate(contrast = fct_rev(fct_inorder(contrast)))
+
+ggplot(all_contrasts, aes(y = contrast, x = estimate, colour = design)) +
+  facet_wrap(~ parameter, scales = "free_x") +
+  geom_vline(xintercept = 0, linetype = "dashed", colour = "grey60") +
+  geom_linerange(aes(xmin = lwr, xmax = upr), linewidth = 0.7) +
+  geom_linerange(aes(xmin = lwr50, xmax = upr50), linewidth = 2.2) +
+  geom_point(size = 2.5) +
+  scale_colour_manual(values = c(Paired = "#1f4e79", Unpaired = "#9aa5b1"), name = NULL) +
+  labs(x = "Difference (first - second population)", y = NULL) +
+  theme_matt_facets(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+
+<img src="../Figures/markdown/population-contrasts-1.png" style="display: block; margin: auto;" />
 
 ``` r
 
-full_model_interaction = survreg(Surv(time, event) ~ population * read_temp_c, data = surv_data, dist = "loglogistic")
-
-full_model_tidy = tidy(full_model_interaction, conf.int = TRUE)
-full_model_tidy
-## # A tibble: 13 × 7
-##    term                       estimate std.error statistic  p.value conf.low conf.high
-##    <chr>                         <dbl>     <dbl>     <dbl>    <dbl>    <dbl>     <dbl>
-##  1 (Intercept)                 129.      38.0        3.39  7.08e- 4   54.2      203.  
-##  2 populationCPCO              -52.5     40.7       -1.29  1.98e- 1 -132.        27.3 
-##  3 populationCPCT              -73.7     51.6       -1.43  1.53e- 1 -175.        27.5 
-##  4 populationHPPA             -107.      50.1       -2.13  3.31e- 2 -205.        -8.56
-##  5 populationLLPA               -8.98    54.9       -0.164 8.70e- 1 -117.        98.6 
-##  6 populationOPOH              -66.3     40.2       -1.65  9.96e- 2 -145.        12.6 
-##  7 read_temp_c                  -3.67     1.10      -3.34  8.23e- 4   -5.82      -1.52
-##  8 populationCPCO:read_temp_c    1.52     1.18       1.29  1.96e- 1   -0.784      3.82
-##  9 populationCPCT:read_temp_c    2.12     1.49       1.42  1.55e- 1   -0.801      5.05
-## 10 populationHPPA:read_temp_c    3.09     1.45       2.13  3.28e- 2    0.252      5.93
-## 11 populationLLPA:read_temp_c    0.280    1.58       0.177 8.60e- 1   -2.83       3.39
-## 12 populationOPOH:read_temp_c    1.92     1.16       1.65  9.86e- 2   -0.358      4.20
-## 13 Log(scale)                   -0.509    0.0592    -8.60  7.74e-18   NA         NA
+all_contrasts |> 
+  transmute(contrast = as.character(contrast), design, parameter,
+            value = sprintf("%.2f [%.2f, %.2f]; P(>0) = %.2f", estimate, lwr, upr, p_gt0)) |> 
+  pivot_wider(names_from = parameter, values_from = value) |> 
+  knitr::kable(caption = "Pairwise population differences (first − second): posterior median [95% credible interval] and posterior probability that the difference is > 0.")
 ```
 
-Each 1°C increase in read temperature is associated with median survival
-time shrinking to about 3% of its prior value (time ratio 0.0254, p
-0.00082) — a steep, well-supported decline over the 31-34.8°C range
-tested. There is no evidence of a difference between populations once
-temperature is accounted for (time ratio 0, p 0.1), and the wide
-confidence interval on that estimate reflects the modest sample size.
+| contrast | design | CTmax (°C) | z (°C) | T at LT50 = 1 h (°C) |
+|:---|:---|:---|:---|:---|
+| BRNY - CPCT | Paired | 0.04 \[-0.52, 0.84\]; P(\>0) = 0.63 | 0.03 \[-0.66, 1.07\]; P(\>0) = 0.60 | -0.01 \[-1.05, 0.82\]; P(\>0) = 0.48 |
+| BRNY - HPPA | Paired | -0.07 \[-0.86, 0.65\]; P(\>0) = 0.30 | 0.03 \[-0.56, 0.98\]; P(\>0) = 0.62 | -0.13 \[-1.15, 0.28\]; P(\>0) = 0.14 |
+| BRNY - LLPA | Paired | -0.04 \[-0.37, 0.70\]; P(\>0) = 0.37 | 0.12 \[-0.07, 1.13\]; P(\>0) = 0.92 | -0.26 \[-1.38, -0.06\]; P(\>0) = 0.01 |
+| CPCO - OPOH | Paired | -0.02 \[-0.31, 0.19\]; P(\>0) = 0.38 | -0.03 \[-0.29, 0.13\]; P(\>0) = 0.30 | 0.03 \[-0.12, 0.26\]; P(\>0) = 0.70 |
+| CPCT - HPPA | Paired | -0.11 \[-0.78, 0.41\]; P(\>0) = 0.19 | 0.01 \[-0.54, 0.72\]; P(\>0) = 0.54 | -0.12 \[-0.96, 0.26\]; P(\>0) = 0.14 |
+| CPCT - LLPA | Paired | -0.08 \[-0.39, 0.46\]; P(\>0) = 0.24 | 0.09 \[-0.08, 0.84\]; P(\>0) = 0.90 | -0.25 \[-1.17, -0.07\]; P(\>0) = 0.01 |
+| HPPA - LLPA | Paired | 0.03 \[-0.25, 0.72\]; P(\>0) = 0.60 | 0.08 \[-0.09, 0.68\]; P(\>0) = 0.87 | -0.12 \[-0.61, 0.04\]; P(\>0) = 0.06 |
+| BRNY - CPCO | Unpaired | -0.06 \[-0.71, 0.87\]; P(\>0) = 0.38 | -0.05 \[-0.62, 1.11\]; P(\>0) = 0.39 | 0.03 \[-1.18, 0.58\]; P(\>0) = 0.55 |
+| BRNY - OPOH | Unpaired | -0.08 \[-0.86, 0.85\]; P(\>0) = 0.34 | -0.08 \[-0.82, 1.12\]; P(\>0) = 0.33 | 0.06 \[-1.18, 0.74\]; P(\>0) = 0.62 |
+| CPCO - CPCT | Unpaired | 0.10 \[-0.60, 0.64\]; P(\>0) = 0.71 | 0.07 \[-0.76, 0.54\]; P(\>0) = 0.69 | -0.04 \[-0.48, 0.97\]; P(\>0) = 0.42 |
+| CPCO - HPPA | Unpaired | -0.02 \[-0.88, 0.56\]; P(\>0) = 0.47 | 0.08 \[-0.65, 0.56\]; P(\>0) = 0.71 | -0.16 \[-0.59, 0.42\]; P(\>0) = 0.17 |
+| CPCO - LLPA | Unpaired | 0.01 \[-0.45, 0.50\]; P(\>0) = 0.53 | 0.17 \[-0.12, 0.57\]; P(\>0) = 0.92 | -0.29 \[-0.65, -0.02\]; P(\>0) = 0.02 |
+| CPCT - OPOH | Unpaired | -0.12 \[-0.79, 0.59\]; P(\>0) = 0.26 | -0.11 \[-0.72, 0.77\]; P(\>0) = 0.26 | 0.07 \[-0.95, 0.64\]; P(\>0) = 0.65 |
+| HPPA - OPOH | Unpaired | -0.01 \[-0.71, 0.88\]; P(\>0) = 0.48 | -0.12 \[-0.71, 0.64\]; P(\>0) = 0.24 | 0.20 \[-0.39, 0.75\]; P(\>0) = 0.86 |
+| LLPA - OPOH | Unpaired | -0.04 \[-0.61, 0.42\]; P(\>0) = 0.41 | -0.20 \[-0.69, 0.11\]; P(\>0) = 0.06 | 0.32 \[0.04, 0.78\]; P(\>0) = 0.98 |
 
-## Just temperatures above 33°C
+Pairwise population differences (first − second): posterior median \[95%
+credible interval\] and posterior probability that the difference is \>
+0.
 
-Restricting to individuals held at read temperatures above 33°C, an AFT
-model is fit with a population × temperature interaction, per the
-analysis plan, even though the interaction was not significant over the
-full temperature range.
+Thick bars show 50% and thin bars 95% credible intervals. P(\>0) near 0
+or 1 means the posterior strongly favours one population being higher.
+With 15 comparisons read together, look for a consistent pattern
+(e.g. one population standing apart on several contrasts) rather than a
+single contrast that happens to cross a threshold.
 
-``` r
-surv_data_high = surv_data |> filter(read_temp_c > 33)
+With the current data, credible intervals on population differences are
+wide, especially for the four populations with four runs each over
+34.3–34.9 °C. Overlapping intervals here reflect limited power, not
+evidence that populations are the same.
 
-high_temp_model = survreg(Surv(time, event) ~ population * read_temp_c, data = surv_data_high, dist = "loglogistic")
-
-high_temp_tidy = tidy(high_temp_model, conf.int = TRUE)
-high_temp_tidy
-## # A tibble: 13 × 7
-##    term                       estimate std.error statistic  p.value conf.low conf.high
-##    <chr>                         <dbl>     <dbl>     <dbl>    <dbl>    <dbl>     <dbl>
-##  1 (Intercept)                 129.      38.0        3.39  7.08e- 4   54.2      203.  
-##  2 populationCPCO              -52.5     40.7       -1.29  1.98e- 1 -132.        27.3 
-##  3 populationCPCT              -73.7     51.6       -1.43  1.53e- 1 -175.        27.5 
-##  4 populationHPPA             -107.      50.1       -2.13  3.31e- 2 -205.        -8.56
-##  5 populationLLPA               -8.98    54.9       -0.164 8.70e- 1 -117.        98.6 
-##  6 populationOPOH              -66.3     40.2       -1.65  9.96e- 2 -145.        12.6 
-##  7 read_temp_c                  -3.67     1.10      -3.34  8.23e- 4   -5.82      -1.52
-##  8 populationCPCO:read_temp_c    1.52     1.18       1.29  1.96e- 1   -0.784      3.82
-##  9 populationCPCT:read_temp_c    2.12     1.49       1.42  1.55e- 1   -0.801      5.05
-## 10 populationHPPA:read_temp_c    3.09     1.45       2.13  3.28e- 2    0.252      5.93
-## 11 populationLLPA:read_temp_c    0.280    1.58       0.177 8.60e- 1   -2.83       3.39
-## 12 populationOPOH:read_temp_c    1.92     1.16       1.65  9.86e- 2   -0.358      4.20
-## 13 Log(scale)                   -0.509    0.0592    -8.60  7.74e-18   NA         NA
-```
-
-The interaction term remains non-significant (p 0.099), so there is
-still no evidence that the two populations decline at different rates as
-temperature rises above 33°C — both show a similarly steep drop in
-median survival time (main effect of read temperature: time ratio 0.0254
-per 1°C, p 0.00082). The interaction is retained here per the analysis
-plan, but given its lack of significance and the small per-cell sample
-sizes, the near-parallel curves in the plot below should be interpreted
-cautiously rather than as confirmed evidence of population-specific
-slopes.
+## Tolerance landscape visualization
 
 ``` r
-high_pred_grid = expand_grid(
-  population = unique(surv_data_high$population),
-  read_temp_c = seq(min(surv_data_high$read_temp_c), max(surv_data_high$read_temp_c), length.out = 100)
-)
-
-high_pred = predict(high_temp_model, newdata = high_pred_grid, type = "quantile", p = 0.5, se.fit = TRUE)
-
-high_pred_grid = high_pred_grid |>
-  mutate(
-    median_time = high_pred$fit,
-    se = high_pred$se.fit,
-    lwr = exp(log(median_time) - 1.96 * se / median_time),
-    upr = exp(log(median_time) + 1.96 * se / median_time)
-  )
-
-ggplot(high_pred_grid, aes(x = read_temp_c, y = median_time, color = population, fill = population)) +
-  #geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.15, color = NA) +
-  geom_line(linewidth = 3) +
-  #scale_y_log10() +
-  labs(
-    x = "Water bath temperature (read, °C)",
-    y = "Predicted median survival time (min, log scale)",
-    title = "AFT model (log-logistic, population × temperature): median survival vs. temperature",
-    subtitle = "Restricted to read temperatures above 33°C"
-  ) +
-  theme_matt() + 
-  theme(legend.position = "right")
-```
-
-<img src="../Figures/markdown/plot-restricted-aft-predictions-1.png" style="display: block; margin: auto;" />
-
-## Tolerance Landscape Parameters
-
-Below, we re-fit a model to each population separately, and extract the
-relevant model parameters (intercept and slope term). These are shown
-below, and tend to fall within the expected range (CTmax is slightly
-higher than 35°C for each population, and the slopes are ~0.2, similar
-to what’s been observed in other systems).
-
-``` r
-
-TTL_params = surv_data_high %>%
-  group_by(population) %>%
-  do(tidy(survreg(Surv(time, event) ~ read_temp_c, data = ., dist = "loglogistic"))) |> 
-  mutate(term = if_else(term == "(Intercept)", "Beta_0", term)) |> 
-  filter(term != "Log(scale)") |> 
-  pivot_wider(id_cols = population, 
-              names_from = term, 
-              values_from = c(estimate, std.error)) |>  
-  select(population, "Beta_0" = estimate_Beta_0, "temp_slope" = estimate_read_temp_c, 
-         "std_err_beta_0" = std.error_Beta_0, "std_err_slope" = std.error_read_temp_c) |> 
-  mutate(ctmax_static = -1*(Beta_0/temp_slope),
-         z_slope = -1/temp_slope)
-
-TTL_params |> 
-  select(population, ctmax_static, z_slope)
-## # A tibble: 6 × 3
-## # Groups:   population [6]
-##   population ctmax_static z_slope
-##   <chr>             <dbl>   <dbl>
-## 1 BRNY               35.1   0.269
-## 2 CPCO               35.4   0.451
-## 3 CPCT               35.5   0.645
-## 4 HPPA               38.1   1.91 
-## 5 LLPA               35.3   0.292
-## 6 OPOH               35.7   0.569
-```
-
-## Dynamic Landscapes
-
-Rezende et al. 2020 provide functions to 1) estimate the tolerance
-landscape from LT50 times and temperatures, and 2) use this landscape to
-predict mortality under fluctuating temperatures. Their original
-approach (`tolerance.landscape()`) first collapses each temperature to a
-single LT50 point estimate, then fits `ctmax`/`z` via a linear model
-across those points. They then build the reference survival curve by
-interpolating raw per-temperature survival curves.
-
-**Superseded exploratory step, not used downstream.** The chunk below
-(not evaluated) shows what that LT50-estimation step looks like; it is
-kept only for reference and is **not** the method used to build the
-landscape in this report. The `lt50_values` object it would produce is
-unused elsewhere.
-
-``` r
-
-lt50_values = surv_data_high %>%
-  group_by(population, experiment_date, read_temp_c) %>%
-  nest() %>%
-  mutate(
-    model = map(data, ~ survreg(Surv(time, event) ~ 1, data = .x, dist = "loglogistic")),
-    lt50 = map_dbl(model, ~ predict(.x, type = "quantile", p = 0.5)[1])
-  ) %>%
-  dplyr::select(population, lt50) |>  
-  filter(read_temp_c < 35.4) %>% 
-  filter(lt50 > 2)
-
-ggplot(lt50_values, aes(x = read_temp_c, y = log(lt50))) + 
-  facet_wrap(population~.) + 
-  geom_point(aes(colour = factor(experiment_date))) + 
-  geom_smooth(method = "lm", se = F, colour = "black") + 
-  theme_matt() + 
-  theme(legend.position = "right")
-```
-
-<img src="../Figures/markdown/unnamed-chunk-4-1.png" style="display: block; margin: auto;" />
-
-Instead, we fit an AFT model to the full individual-level, censored
-survival data for each population (as in `TTL_params`) and extract the
-tolerance landscape directly from the model with `model_ttl()` - this is
-a modified version of the `tolerance.landscape()` function from Rezende.
-This uses all individuals rather than collapsing each temperature to a
-single LT50 estimate first, and propagates coefficient uncertainty into
-`ctmax`, `z`, and the reference survival curve via simulation from
-`vcov(model)`.
-
-``` r
-co_data = surv_data_high |> filter(population == "CPCO")
-oh_data = surv_data_high |> filter(population == "OPOH")
-
-co_model = survreg(Surv(time, event) ~ read_temp_c, data = co_data, dist = "loglogistic")
-oh_model = survreg(Surv(time, event) ~ read_temp_c, data = oh_data, dist = "loglogistic")
-
-co_tl = model_ttl(co_model, "read_temp_c", seed = 6053)
-oh_tl = model_ttl(oh_model, "read_temp_c", seed = 7481)
-
-parameters = tibble(
-  population = c("CPCO", "OPOH"),
-  ctmax = c(co_tl$ctmax, oh_tl$ctmax),
-  ctmax_lwr = c(co_tl$ctmax.ci[1], oh_tl$ctmax.ci[1]),
-  ctmax_upr = c(co_tl$ctmax.ci[2], oh_tl$ctmax.ci[2]),
-  z = c(co_tl$z, oh_tl$z),
-  z_lwr = c(co_tl$z.ci[1], oh_tl$z.ci[1]),
-  z_upr = c(co_tl$z.ci[2], oh_tl$z.ci[2])
-)
-```
-
-## Tolerance Landscape Visualization
-
-``` r
-
-# Thermal tolerance landscape (3D wireframe)
-# Survival probability across exposure temperature and duration,
-# based on the thermal death time (TDT) model of Rezende et al. (2014):
-#   T50(t)  = ctmax - z * log10(t / t_ref)
-#   S(T, t) = 1 / (1 + exp((T - T50(t)) / sigma))
+# Thermal tolerance landscape (3D wireframe) drawn from the fitted model:
+#   log10 LT50(T) = (CTmax - T) / z
+#   S(T, t) = 1 - F((log t - log LT50(T)) / sigma), F = model distribution
 # Base R only; no packages needed.
 
 # Helper: which points on the surface can the viewer see? From each point we
@@ -393,39 +591,38 @@ draw_axis_3d <- function(pm, p0, p1, at, labels, title, centre,
   text(tp[1] / sx, tp[2] / sy, title, srt = ang, cex = cex_title)
 }
 
-plot_tolerance_landscape_3d <- function(ctmax, z,
-                                        t_ref   = 1,          # minutes at which ctmax applies
-                                        sigma   = 0.15,       # width of survival transition (deg C)
+plot_tolerance_landscape_3d <- function(tl,                   # landscape from brms_ttl() / model_ttl()
                                         t_range = c(1, 720),  # exposure range in minutes (1 min to 12 h)
+                                        pad     = 0.5,        # deg C added beyond the 50% line on each side
                                         n       = 50,         # mesh lines per axis
                                         theta   = 130,        # viewing angles: rotate ...
                                         phi     = 35,         # ... and tilt
                                         tdt_col = "#c2410c") { # colour of the survival-limit line
-  t50  <- function(t) ctmax - z * log10(t / t_ref)
-  pad  <- max(6 * sigma, 1)
-  temp <- seq(min(t50(t_range)) - pad, max(t50(t_range)) + 1.5 * pad, length.out = n)
-  time <- seq(t_range[1], t_range[2], length.out = n) / 60          # hours
-  surv <- outer(time, temp, function(h, T) plogis((t50(h * 60) - T) / sigma))
-  
+  t50  <- function(t) tl$ctmax - tl$z * log10(t)               # temperature giving LT50 = t minutes
+  temp <- seq(min(t50(t_range)) - pad, max(t50(t_range)) + pad, length.out = n)
+  time <- seq(t_range[1], t_range[2], length.out = n) / 60     # hours
+  surf_fun <- function(h, T) {                                 # survival at h hours, temperature T
+    loc <- log(10) * (tl$ctmax - T) / tl$z
+    1 - pstd(tl$dist, (log(h * 60) - loc) / tl$sigma)
+  }
+  surv <- ttl_surface(tl, temps = temp, times = time * 60)
+
   op <- par(mar = c(1.2, 1.6, 0.4, 0.4), xpd = NA); on.exit(par(op))
   pm <- persp(time, temp, surv,
               theta = theta, phi = phi, expand = 0.6, scale = TRUE,
               col = "white", border = "white", lwd = 0.1,
               shade = 0.5, ltheta = -120,
               box = TRUE, axes = FALSE, zlim = c(0, 1))
-  
+
   # Axes: each goes on the box edge nearest the viewer's lower left/right
   xr <- range(time); yr <- range(temp); zr <- c(0, 1)
   centre <- c(mean(xr), mean(yr), mean(zr))
   scr <- function(x, y, z) { q <- trans3d(x, y, z, pm); c(q$x, q$y) }
-  # time axis: the lower of the two bottom edges running along time
   yt <- yr[which.min(sapply(yr, function(y) scr(mean(xr), y, 0)[2]))]
-  # temperature axis: the lower of the two bottom edges running along temperature
   xt <- xr[which.min(sapply(xr, function(x) scr(x, mean(yr), 0)[2]))]
-  # survival axis: the left-most vertical edge
   corners <- expand.grid(x = xr, y = yr)
   k <- which.min(mapply(function(x, y) scr(x, y, 0)[1], corners$x, corners$y))
-  
+
   # skip ticks within 8% of an axis end, so labels don't pile up at the corners
   inner <- function(r, n = 5) { b <- pretty(r, n); e <- 0.08 * diff(r)
   b[b > r[1] + e & b < r[2] - e] }
@@ -433,15 +630,14 @@ plot_tolerance_landscape_3d <- function(ctmax, z,
   draw_axis_3d(pm, c(xr[1], yt, 0), c(xr[2], yt, 0), bt, bt,
                "Exposure duration (h)", centre)
   draw_axis_3d(pm, c(xt, yr[1], 0), c(xt, yr[2], 0), btemp, btemp,
-               "Temperature (\u00b0C)", centre)
+               "Temperature (°C)", centre)
   draw_axis_3d(pm, c(corners$x[k], corners$y[k], 0), c(corners$x[k], corners$y[k], 1),
                bz, format(bz), "Survival probability", centre)
-  
+
   # Survival limit (TDT curve): temperature-duration combinations giving 50% survival.
   # Segments hidden behind the surface are left out.
   hh  <- 10^seq(log10(t_range[1]), log10(t_range[2]), length.out = 400) / 60
-  vis <- visible_on_surface(hh, t50(hh * 60), rep(0.5, length(hh)), pm,
-                            function(h, T) plogis((t50(h * 60) - T) / sigma),
+  vis <- visible_on_surface(hh, t50(hh * 60), rep(0.5, length(hh)), pm, surf_fun,
                             range(time), range(temp))
   pts <- trans3d(hh, t50(hh * 60), 0.5, pm)
   pts$x[!vis] <- NA
@@ -451,273 +647,415 @@ plot_tolerance_landscape_3d <- function(ctmax, z,
   invisible(pm)
 }
 
-# Example
-plot_tolerance_landscape_3d(ctmax = parameters$ctmax[2], z = parameters$z[2])
+plot_tolerance_landscape_3d(ttls[["OPOH"]])
 ```
 
 <img src="../Figures/markdown/TTL-3d-1.png" style="display: block; margin: auto;" />
 
+The surface above is for OPOH. Change the population name to draw
+another.
+
 ## Mortality under variable temperatures
 
-One of the major advantages of the thermal tolerance landscape approach
-is the application of the parameters to predicting mortality under
-fluctuating environments.
+A major advantage of the tolerance landscape approach is that the
+parameters can predict mortality under fluctuating temperatures.
+`dynamic.landscape()` accumulates heat damage minute by minute: each
+minute at temperature *T* counts as 10<sup>(T − T<sub>ref</sub>)/z</sup>
+minutes at the reference temperature. `dynamic_landscape_draws()`
+repeats this for posterior draws to give credible intervals.
 
-### Example 1
+**Caveat:** the model is fitted to runs at 34.0–34.9 °C. Predictions for
+cooler temperatures extrapolate the linear relationship (see the
+linearity check above) and assume no repair of damage between hot
+periods.
 
-In this first example, we simulate a simple fluctuating environment.
-Note, the function assumes temperature for each minute is provided.
+### Example 1: Cheney Reservoir, Kansas
 
-``` r
-variable.temp <- rep(c(30, 34, 34.5),each=10, times = 4)
-
-co_dl <- dynamic.landscape(variable.temp,co_tl) 
-```
-
-<img src="../Figures/markdown/unnamed-chunk-6-1.png" style="display: block; margin: auto;" />
-
-``` r
-oh_dl <- dynamic.landscape(variable.temp,oh_tl)
-```
-
-<img src="../Figures/markdown/unnamed-chunk-6-2.png" style="display: block; margin: auto;" />
-
-As we can see below, the two populations tested exhibit very similar
-levels of mortality under the simulated thermal environment.
-
-``` r
-surv_comp = bind_rows(data.frame("time" = co_dl$time, "alive" = co_dl$alive, "pop" = "CO"),
-                      data.frame("time" = oh_dl$time, "alive" = oh_dl$alive, "pop" = "OH"))
-
-ggplot(surv_comp, aes(x = time, y = alive, colour = pop)) + 
-  geom_line(linewidth = 2) + 
-  theme_matt()
-```
-
-<img src="../Figures/markdown/unnamed-chunk-7-1.png" style="display: block; margin: auto;" />
-
-### Example 2
-
-In this second example, we use a continuous temperature record from a
-local site (a shallow stream in Carlisle, Massachusetts). Note: S.
-pallidus is not found in this habitat type, but the data will serve as
-an illustration of how continuous temperature data can be combined with
-TTL parameters to predict mortality.
-
-``` r
-
-ggplot(env_temps_minutes, aes(x = date_time, y = temp_c)) + 
-  geom_line() + 
-  theme_matt()
-```
-
-<img src="../Figures/markdown/unnamed-chunk-8-1.png" style="display: block; margin: auto;" />
-
-The profile above covers a period from late Spring to early Summer. Most
-of these temperatures are well-below the observed CTmax of S. pallidus,
-so no mortality is expected. However, below we will summarize the
-temperature variability of the warmest week, and use this to examine how
-changes in temperature averages and variability affect survival.
+This example uses the continuous water temperature record from Cheney
+Reservoir near Cheney, Kansas (USGS 07144790), a large reservoir within
+the range of *S. pallidus*. The data are downloaded once with
+`Scripts/02_get_lake_temps.R` (set `download_lake_temps = T` in the
+controller) and saved to `Raw_data/lake_temps/`. The record comes from a
+single fixed sensor, so it describes temperature at that depth only;
+check the sensor depth in `cheney_07144790_ts_metadata.csv`. Recent
+values may be provisional.
 
 ``` r
 library(slider)
 
+have_lake = !is.null(lake_temps_raw) && nrow(lake_temps_raw) > 0
 
-# Daily summary
-daily <- env_temps_minutes |>
+lake_tz = "America/Chicago"   # local time for Cheney Reservoir
+max_gap_min = 60              # interpolate across gaps up to this long; longer gaps split the record
+# Readings with these qualifiers are dropped (case-insensitive regular expression).
+# Check the qualifier table below and adjust if needed.
+drop_qualifier_pattern = "ice|eqp|equip|malf|mnt|maint|dis|bad|rej"
+warming_offsets = 0:5         # deg C added to the hottest observed week
+```
+
+``` r
+lake_temps_raw |>
+  count(approval_status, qualifier = coalesce(na_if(qualifier, ""), "(none)"), name = "readings") |>
+  knitr::kable(caption = "Readings by approval status and qualifier, before cleaning.")
+```
+
+| approval_status | qualifier | readings |
+|:----------------|:----------|---------:|
+| Approved        | (none)    |   265699 |
+| Provisional     | (none)    |     6734 |
+
+Readings by approval status and qualifier, before cleaning.
+
+``` r
+
+lake_temps = lake_temps_raw |>
+  filter(!is.na(value),
+         is.na(qualifier) | !str_detect(str_to_lower(qualifier), drop_qualifier_pattern)) |>
+  mutate(time = with_tz(time, lake_tz)) |>
+  arrange(time)
+
+sampling_interval_min = as.numeric(names(which.max(table(as.numeric(diff(lake_temps$time), units = "mins")))))
+
+tibble(first_reading = min(lake_temps$time), last_reading = max(lake_temps$time),
+       readings_kept = nrow(lake_temps), readings_dropped = nrow(lake_temps_raw) - nrow(lake_temps),
+       usual_interval_min = sampling_interval_min,
+       provisional_pct = 100 * mean(lake_temps$approval_status == "Provisional", na.rm = TRUE)) |>
+  knitr::kable(digits = 1, caption = "Cleaned record (times in local time).")
+```
+
+| first_reading | last_reading | readings_kept | readings_dropped | usual_interval_min | provisional_pct |
+|:---|:---|---:|---:|---:|---:|
+| 2014-10-01 | 2026-10-29 16:15:00 | 272433 | 0 | 15 | 2.5 |
+
+Cleaned record (times in local time).
+
+`dynamic.landscape()` needs one temperature per minute, so readings are
+linearly interpolated to a 1-min series. Gaps longer than 60 minutes are
+not filled: they split the record into separate segments.
+
+``` r
+to_minutes = function(d, max_gap) {
+  d |>
+    mutate(segment = cumsum(c(TRUE, as.numeric(diff(time), units = "mins") > max_gap))) |>
+    group_by(segment) |>
+    filter(n() >= 2) |>
+    group_modify(\(s, k) {
+      grid = seq(ceiling_date(min(s$time), "minute"), floor_date(max(s$time), "minute"), by = "1 min")
+      tibble(time = grid, temp_c = approx(as.numeric(s$time), s$value, xout = as.numeric(grid))$y)
+    }) |>
+    ungroup()
+}
+
+lake_minutes = to_minutes(lake_temps, max_gap_min)
+
+lake_daily = lake_minutes |>
+  mutate(date = as.Date(time, tz = lake_tz)) |>
+  group_by(date) |>
+  summarise(mean_temp = mean(temp_c), min_temp = min(temp_c), max_temp = max(temp_c),
+            n_min = n(), .groups = "drop") |>
+  mutate(complete = n_min == 1440) |>
+  complete(date = seq(min(date), max(date), by = "day"))   # missing days as NA rows, so lines break at gaps
+
+# Temperatures giving LT50 = 1 h and 12 h for OPOH, as reference lines
+ref_lines = ttls[["OPOH"]]$lt_temps |>
+  filter(lt50_min %in% c(60, 720)) |>
+  mutate(label = paste0("OPOH LT50 = ", if_else(lt50_min == 60, "1 h", "12 h")))
+
+ggplot(lake_daily, aes(x = date)) +
+  geom_linerange(aes(ymin = min_temp, ymax = max_temp), colour = "grey70", linewidth = 0.3) +
+  geom_line(aes(y = mean_temp), colour = "grey20", linewidth = 0.3) +
+  geom_hline(data = ref_lines, aes(yintercept = temp, linetype = label), colour = "firebrick") +
+  scale_linetype_manual(values = c("dashed", "dotted"), name = NULL) +
+  labs(x = NULL, y = "Water temperature (°C)") +
+  theme_matt(base_size = 14) +
+  theme(legend.position = "bottom")
+```
+
+<img src="../Figures/markdown/cheney-minutes-1.png" style="display: block; margin: auto;" />
+
+Grey bars show the daily range and the black line the daily mean. Red
+lines mark the temperatures that give OPOH an LT50 of 1 h and 12 h in
+the assays.
+
+For each year, the warmest complete 7-day period (highest mean
+temperature, with no gaps) is extracted, and survival over that week is
+predicted for every population, both as observed and with uniform
+warming added.
+
+``` r
+# Warmest complete 7-day window in each year
+week_starts = lake_daily |>
+  arrange(date) |>
+  mutate(week_mean = slide_dbl(mean_temp, mean, .after = 6, .complete = TRUE),
+         week_complete = slide_lgl(complete, all, .after = 6, .complete = TRUE),
+         consecutive = slide_dbl(as.numeric(date), \(x) diff(range(x)), .after = 6, .complete = TRUE) == 6) |>
+  filter(week_complete %in% TRUE, consecutive %in% TRUE) |>
+  group_by(year = year(date)) |>
+  slice_max(week_mean, n = 1, with_ties = FALSE) |>
+  ungroup() |>
+  select(year, week_start = date, week_mean)
+
+hottest_weeks = week_starts |>
+  mutate(temps = map(week_start, \(d) lake_minutes |>
+                       filter(as.Date(time, tz = lake_tz) >= d, as.Date(time, tz = lake_tz) <= d + 6) |>
+                       pull(temp_c)),
+         week_max = map_dbl(temps, max))
+
+# Point-estimate survival after the week, for each population and warming offset
+week_survival = hottest_weeks |>
+  crossing(population = pops, warming = c(0, 2, 4)) |>
+  mutate(survival = pmap_dbl(list(temps, population, warming), \(t, p, w)
+    tail(dynamic.landscape(t + w, ttls[[p]], plot = FALSE)$alive, 1)))
+
+week_survival |>
+  group_by(year, week_start, week_mean, week_max, population) |>
+  summarise(survival = paste(sprintf("%.0f", survival[order(warming)]), collapse = " / "), .groups = "drop") |>
+  pivot_wider(names_from = population, values_from = survival) |>
+  knitr::kable(digits = 1, caption = "Warmest week of each year: mean and maximum temperature (°C), and predicted survival (%) after the week for each population as observed / +2 °C / +4 °C of uniform warming.")
+```
+
+| year | week_start | week_mean | week_max | BRNY | CPCO | CPCT | HPPA | LLPA | OPOH |
+|---:|:---|---:|---:|:---|:---|:---|:---|:---|:---|
+| 2014 | 2014-10-01 | 20.1 | 21.9 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 |
+| 2015 | 2015-08-04 | 27.4 | 28.8 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 |
+| 2016 | 2016-07-30 | 28.1 | 29.1 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 99 |
+| 2017 | 2017-07-20 | 27.9 | 29.4 | 100 / 100 / 99 | 100 / 100 / 98 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 94 |
+| 2018 | 2018-07-19 | 28.3 | 29.0 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 99 |
+| 2019 | 2019-07-17 | 27.3 | 29.5 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 99 |
+| 2020 | 2020-07-23 | 27.9 | 28.8 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 |
+| 2021 | 2021-07-30 | 27.4 | 28.8 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 |
+| 2022 | 2022-07-21 | 27.7 | 28.7 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 |
+| 2023 | 2023-08-01 | 28.3 | 29.1 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 98 |
+| 2024 | 2024-08-01 | 27.7 | 31.6 | 100 / 100 / 0 | 100 / 100 / 0 | 100 / 100 / 0 | 100 / 100 / 0 | 100 / 100 / 0 | 100 / 100 / 0 |
+| 2025 | 2025-07-23 | 27.7 | 29.7 | 100 / 100 / 99 | 100 / 100 / 97 | 100 / 100 / 99 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 94 |
+| 2026 | 2026-07-26 | 27.9 | 29.1 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 |
+
+Warmest week of each year: mean and maximum temperature (°C), and
+predicted survival (%) after the week for each population as observed /
++2 °C / +4 °C of uniform warming.
+
+The figure below takes the warmest week in the whole record and asks how
+much uniform warming it would take before predicted mortality appears.
+Lines are point estimates and ribbons 95% credible intervals from the
+posterior draws. Wide ribbons at small amounts of warming come from
+posterior draws with larger z (a shallower decline in survival time with
+temperature): extrapolated far below the assay temperatures, these
+predict some mortality even at observed lake temperatures. Assays at
+cooler temperatures are what will narrow them.
+
+``` r
+peak_week = hottest_weeks |> slice_max(week_mean, n = 1, with_ties = FALSE)
+
+warming_survival = crossing(population = pops, warming = warming_offsets) |>
+  mutate(pred = map2(population, warming, \(p, w)
+    tail(dynamic_landscape_draws(peak_week$temps[[1]] + w, ttls[[p]], ndraws = 300, seed = 3), 1))) |>
+  unnest(pred)
+
+ggplot(warming_survival, aes(x = warming, y = alive, colour = population, fill = population)) +
+  facet_wrap(~ population) +
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2, colour = NA) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2) +
+  scale_colour_manual(values = pop_colours, guide = "none") + scale_fill_manual(values = pop_colours, guide = "none") +
+  labs(x = "Warming added to the warmest observed week (°C)", y = "Predicted survival after 7 days (%)",
+       subtitle = paste0("Warmest week: ", format(peak_week$week_start), " to ", format(peak_week$week_start + 6),
+                         " (observed mean ", sprintf("%.1f", peak_week$week_mean), " °C, max ",
+                         sprintf("%.1f", peak_week$week_max), " °C)")) +
+  theme_matt_facets(base_size = 12) +
+  theme(plot.subtitle = element_text(size = 11))
+```
+
+<img src="../Figures/markdown/cheney-warming-1.png" style="display: block; margin: auto;" />
+
+These predictions assume uniform warming. They do not account for repair
+of heat damage, for copepods moving to cooler depths, or for any change
+in the shape of the daily cycle. Because the assays only cover 34.0–34.9
+°C, predictions for weeks that peak well below that range rest on
+extrapolation.
+
+### Example 2
+
+This example uses a continuous temperature record from a shallow stream
+in Carlisle, Massachusetts. *S. pallidus* does not occur in this
+habitat, so the record only illustrates the workflow. The logger peaks
+near 32 °C with daily ranges of about 12 °C in May, which suggests it
+was at times exposed to air or direct sun. Check this before relying on
+the record.
+
+``` r
+ggplot(env_temps_minutes, aes(x = date_time, y = temp_c)) +
+  geom_line() +
+  labs(x = NULL, y = "Temperature (°C)") +
+  theme_matt()
+```
+
+<img src="../Figures/markdown/stream-temps-1.png" style="display: block; margin: auto;" />
+
+The warmest week of the record is summarised below and used to build
+simulated weeks with a sinusoidal daily cycle.
+
+``` r
+library(slider)
+
+daily = env_temps_minutes |>
   mutate(date = as.Date(date_time)) |>
   group_by(date) |>
   summarise(mean_temp = mean(temp_c, na.rm = TRUE),
             min_temp = min(temp_c, na.rm = TRUE),
             max_temp = max(temp_c, na.rm = TRUE),
-            n = n()) |>
-  ungroup()
+            n = n(), .groups = "drop") |>
+  filter(n == 1440)                         # complete days only
 
-range(daily$date)
-## [1] "2026-04-29" "2026-06-01"
-
-daily_roll <- daily |>
+warmest_end = daily |>
   arrange(date) |>
-  mutate(roll_mean_temp = slide_dbl(mean_temp, mean, .before = 6, .complete = TRUE))
+  mutate(roll_mean_temp = slide_dbl(mean_temp, mean, .before = 6, .complete = TRUE)) |>
+  filter(!is.na(roll_mean_temp)) |>
+  slice_max(roll_mean_temp, n = 1) |>
+  pull(date)
 
-# Find window ending on the date with max rolling mean
-warmest_end <- daily_roll |> filter(!is.na(roll_mean_temp)) |> slice_max(roll_mean_temp, n = 1) |> pull(date)
+warmest_week_summary = daily |>
+  filter(date >= warmest_end - 6, date <= warmest_end) |>
+  summarise(week_start = min(date),
+            week_end = max(date),
+            mean_temp_week = mean(mean_temp),
+            mean_daily_range = mean(max_temp - min_temp),
+            max_temp_week = max(max_temp))
 
-warmest_start <- warmest_end - 6
-
-c(warmest_start, warmest_end)
-## [1] "2026-05-17" "2026-05-23"
-
-
-warmest_week_daily <- daily |> filter(date >= warmest_start, date <= warmest_end)
-
-warmest_week_daily
-## # A tibble: 7 × 5
-##   date       mean_temp min_temp max_temp     n
-##   <date>         <dbl>    <dbl>    <dbl> <int>
-## 1 2026-05-17      19.2     12.9     27.0  1440
-## 2 2026-05-18      20.4     14.5     28.3  1440
-## 3 2026-05-19      22.3     15.7     31.3  1440
-## 4 2026-05-20      23.5     18.4     31.8  1440
-## 5 2026-05-21      18.9     14.9     24.8  1440
-## 6 2026-05-22      17.5     12.1     25.0  1440
-## 7 2026-05-23      16.4     12.8     20.3  1440
-
-warmest_week_summary <- warmest_week_daily |>
-  summarise(
-    week_start = min(date),
-    week_end = max(date),
-    mean_temp_week = mean(mean_temp),
-    mean_daily_range = mean(max_temp - min_temp),
-    min_daily_range = min(max_temp - min_temp),
-    max_daily_range = max(max_temp - min_temp)
-  )
-
-warmest_week_summary
-## # A tibble: 1 × 6
-##   week_start week_end   mean_temp_week mean_daily_range min_daily_range max_daily_range
-##   <date>     <date>              <dbl>            <dbl>           <dbl>           <dbl>
-## 1 2026-05-17 2026-05-23           19.7             12.5            7.55            15.6
-
-
-warmest_week_daily |>
-  mutate(daily_range = max_temp - min_temp)
-## # A tibble: 7 × 6
-##   date       mean_temp min_temp max_temp     n daily_range
-##   <date>         <dbl>    <dbl>    <dbl> <int>       <dbl>
-## 1 2026-05-17      19.2     12.9     27.0  1440       14.1 
-## 2 2026-05-18      20.4     14.5     28.3  1440       13.8 
-## 3 2026-05-19      22.3     15.7     31.3  1440       15.6 
-## 4 2026-05-20      23.5     18.4     31.8  1440       13.5 
-## 5 2026-05-21      18.9     14.9     24.8  1440        9.86
-## 6 2026-05-22      17.5     12.1     25.0  1440       12.8 
-## 7 2026-05-23      16.4     12.8     20.3  1440        7.55
-
-warmest_week_summary |> select(mean_daily_range, min_daily_range, max_daily_range)
-## # A tibble: 1 × 3
-##   mean_daily_range min_daily_range max_daily_range
-##              <dbl>           <dbl>           <dbl>
-## 1             12.5            7.55            15.6
+knitr::kable(warmest_week_summary, digits = 2)
 ```
 
-Here we model daily temperature as a sinusoid centered on the target
-mean, with amplitude set so peak-to-trough equals the target daily
-range, phased so the trough falls in early morning and the peak in
-mid-afternoon (typical diurnal pattern).
+| week_start | week_end   | mean_temp_week | mean_daily_range | max_temp_week |
+|:-----------|:-----------|---------------:|-----------------:|--------------:|
+| 2026-05-17 | 2026-05-23 |          19.73 |            12.45 |         31.83 |
 
 ``` r
-
-simulate_temp_week <- function(mean_temp, daily_range, start_date = as.Date("2026-01-01"),
-                                trough_hour = 5, peak_hour = 15, noise_sd = 0, seed = 4127) {
+# Daily temperature as a sinusoid around the target mean, with peak-to-trough
+# equal to the target daily range, trough at `trough_hour` and peak 12 h later.
+simulate_temp_week = function(mean_temp, daily_range, start_date = as.Date("2026-01-01"),
+                              trough_hour = 5, noise_sd = 0, seed = 4127) {
   set.seed(seed)
-  amplitude <- daily_range / 2
-  n_minutes <- 7 * 24 * 60
-
-  # Datetime sequence at minute resolution
-  date_time <- seq(as.POSIXct(paste(start_date, "00:00:00")),
-                    by = "min", length.out = n_minutes)
-
-  # Fraction of day, phase-shifted so the minimum aligns with trough_hour
-  hour_of_day <- as.numeric(format(date_time, "%H")) +
-    as.numeric(format(date_time, "%M")) / 60
-  phase <- (peak_hour - trough_hour) / 24  # phase reference from trough
-
-  # Sinusoid: trough at trough_hour, peak at peak_hour
-  angle <- 2 * pi * (hour_of_day - trough_hour) / 24 - pi / 2 * 0
-  temp_c <- mean_temp - amplitude * cos(2 * pi * (hour_of_day - trough_hour) / 24)
-
-  # Add small autocorrelated-ish noise (simple white noise here for minute jitter)
-  temp_c <- temp_c + rnorm(n_minutes, mean = 0, sd = noise_sd)
-
+  n_minutes = 7 * 24 * 60
+  date_time = seq(as.POSIXct(paste(start_date, "00:00:00"), tz = "UTC"), by = "min", length.out = n_minutes)
+  hour_of_day = (seq_len(n_minutes) - 1) %% 1440 / 60
+  temp_c = mean_temp - daily_range / 2 * cos(2 * pi * (hour_of_day - trough_hour) / 24) +
+    rnorm(n_minutes, mean = 0, sd = noise_sd)
   tibble(date_time = date_time, temp_c = temp_c)
 }
 
-sim_week <- simulate_temp_week(
-  mean_temp = warmest_week_summary$mean_temp_week,
-  daily_range = warmest_week_summary$mean_daily_range
-)
+base_mean  = warmest_week_summary$mean_temp_week
+base_range = warmest_week_summary$mean_daily_range
 
-ggplot(sim_week, aes(date_time, temp_c)) +
-  geom_line() +
-  labs(x = "Date/time", y = "Temperature (°C)")
+scenarios = tribble(
+  ~scenario,                      ~mean_shift, ~range_shift,
+  "Observed warmest week",        0,           0,
+  "+6 °C mean",                   6,           0,
+  "+7 °C mean",                   7,           0,
+  "+8 °C mean",                   8,           0,
+  "Observed mean, +4 °C range",   0,           4,
+  "+6 °C mean, +4 °C range",      6,           4) |>
+  mutate(scenario = fct_inorder(scenario))   # keep this order in tables
+
+scenario_results = scenarios |>
+  mutate(week = map2(mean_shift, range_shift, \(m, r) simulate_temp_week(base_mean + m, base_range + r)),
+         max_temp = map_dbl(week, \(w) max(w$temp_c))) |>
+  crossing(population = c("CPCO", "OPOH")) |>
+  mutate(pred = map2(week, population, \(w, p) dynamic_landscape_draws(w$temp_c, ttls[[p]], ndraws = 300, seed = 2)))
+
+scenario_results |>
+  mutate(final = map(pred, \(d) tail(d, 1))) |>
+  unnest(final) |>
+  transmute(scenario, population, `Max temp (°C)` = max_temp,
+            `Survival after 7 days (%)` = fmt_ci(alive, lwr, upr, digits = 1)) |>
+  knitr::kable(digits = 1, caption = "Predicted survival after one week (posterior median [95% credible interval]).")
 ```
 
-<img src="../Figures/markdown/unnamed-chunk-10-1.png" style="display: block; margin: auto;" />
+| scenario | population | Max temp (°C) | Survival after 7 days (%) |
+|:---|:---|---:|:---|
+| Observed warmest week | CPCO | 26 | 100.0 \[100.0, 100.0\] |
+| Observed warmest week | OPOH | 26 | 100.0 \[100.0, 100.0\] |
+| +6 °C mean | CPCO | 32 | 100.0 \[97.6, 100.0\] |
+| +6 °C mean | OPOH | 32 | 100.0 \[91.1, 100.0\] |
+| +7 °C mean | CPCO | 33 | 99.9 \[54.8, 100.0\] |
+| +7 °C mean | OPOH | 33 | 99.6 \[31.1, 100.0\] |
+| +8 °C mean | CPCO | 34 | 28.5 \[3.5, 70.0\] |
+| +8 °C mean | OPOH | 34 | 21.5 \[1.4, 67.5\] |
+| Observed mean, +4 °C range | CPCO | 28 | 100.0 \[100.0, 100.0\] |
+| Observed mean, +4 °C range | OPOH | 28 | 100.0 \[100.0, 100.0\] |
+| +6 °C mean, +4 °C range | CPCO | 34 | 31.7 \[4.2, 73.2\] |
+| +6 °C mean, +4 °C range | OPOH | 34 | 24.2 \[1.7, 70.8\] |
 
-When applied to this simulated temperature regime, there is no predicted
-mortality.
+Predicted survival after one week (posterior median \[95% credible
+interval\]).
+
+The plot below overlays temperature and predicted OPOH survival for the
+“+6 °C mean, +4 °C range” scenario, highlighting how survival drops
+during daily temperature peaks.
 
 ``` r
+dyn_df = scenario_results |>
+  filter(scenario == "+6 °C mean, +4 °C range", population == "OPOH") |>
+  pull(pred) |>
+  pluck(1)
 
-dyn_surv = dynamic.landscape(sim_week$temp_c, oh_tl)
+temp_range = range(dyn_df$ta)
+scale_surv   = function(x) x / 100 * diff(temp_range) + temp_range[1]
+unscale_surv = function(x) (x - temp_range[1]) / diff(temp_range) * 100
+
+ggplot(dyn_df, aes(x = time / 1440)) +
+  geom_line(aes(y = ta, colour = "Temperature (°C)"), linewidth = 0.6) +
+  geom_ribbon(aes(ymin = scale_surv(lwr), ymax = scale_surv(upr)), fill = "steelblue", alpha = 0.2) +
+  geom_line(aes(y = scale_surv(alive), colour = "Survival (%)"), linewidth = 1.5) +
+  scale_y_continuous(name = "Temperature (°C)",
+                     sec.axis = sec_axis(~ unscale_surv(.), name = "Survival (%)")) +
+  scale_colour_manual(values = c("Survival (%)" = "steelblue", "Temperature (°C)" = "firebrick")) +
+  labs(x = "Day", colour = NULL) +
+  theme_matt() +
+  theme(legend.position = "bottom")
 ```
 
-<img src="../Figures/markdown/unnamed-chunk-11-1.png" style="display: block; margin: auto;" />
+<img src="../Figures/markdown/scenario-overlay-1.png" style="display: block; margin: auto;" />
 
-When we increase the average temperature (six degree increase),
-mortality increases.
+## Session info
 
 ``` r
-
-sim_week_warm <- simulate_temp_week(
-  mean_temp = warmest_week_summary$mean_temp_week + 8,
-  daily_range = warmest_week_summary$mean_daily_range
-)
-
-warm_dyn_tl = dynamic.landscape(sim_week_warm$temp_c, oh_tl)
+sessionInfo()
+## R version 4.1.3 (2022-03-10)
+## Platform: x86_64-apple-darwin17.0 (64-bit)
+## Running under: macOS 15.7.9
+## 
+## Matrix products: default
+## LAPACK: /Library/Frameworks/R.framework/Versions/4.1/Resources/lib/libRlapack.dylib
+## 
+## locale:
+## [1] en_US.UTF-8/en_US.UTF-8/en_US.UTF-8/C/en_US.UTF-8/en_US.UTF-8
+## 
+## attached base packages:
+## [1] stats     graphics  grDevices utils     datasets  methods   base     
+## 
+## other attached packages:
+##  [1] slider_0.3.0       lubridate_1.9.2    forcats_1.0.1      stringr_1.6.0      dplyr_1.2.1        purrr_1.0.1       
+##  [7] readr_2.1.4        tidyr_1.3.2        tibble_3.2.1       tidyverse_2.0.0    scales_1.4.0       broom_1.0.12      
+## [13] brms_2.23.0        Rcpp_1.0.10        rstan_2.21.8       ggplot2_4.0.3      StanHeaders_2.39.1 survival_3.5-7    
+## [19] rmarkdown_2.31    
+## 
+## loaded via a namespace (and not attached):
+##  [1] nlme_3.1-162         matrixStats_0.63.0   bit64_4.0.5          RColorBrewer_1.1-3   tensorA_0.36.2      
+##  [6] tools_4.1.3          backports_1.4.1      bslib_0.10.0         R6_2.6.1             otel_0.2.0          
+## [11] mgcv_1.8-42          DBI_1.3.0            colorspace_2.1-1     withr_3.0.2          processx_3.8.1      
+## [16] tidyselect_1.2.1     gridExtra_2.3        Brobdingnag_1.2-9    emmeans_1.10.0       bit_4.6.0           
+## [21] compiler_4.1.3       cli_3.6.6            sandwich_3.1-0       labeling_0.4.3       posterior_1.7.0     
+## [26] sass_0.4.10          checkmate_2.3.2      mvtnorm_1.1-3        S7_0.2.1             digest_0.6.31       
+## [31] pkgconfig_2.0.3      htmltools_0.5.9      highr_0.12           fastmap_1.2.0        rlang_1.3.0         
+## [36] rstudioapi_0.18.0    jquerylib_0.1.4      farver_2.1.2         generics_0.1.4       zoo_1.8-12          
+## [41] jsonlite_1.8.4       vroom_1.6.3          car_3.1-2            distributional_0.3.2 inline_0.3.21       
+## [46] magrittr_2.0.3       loo_2.10.1           bayesplot_1.15.0     Matrix_1.5-1         abind_1.4-8         
+## [51] lifecycle_1.0.5      stringi_1.7.12       multcomp_1.4-25      yaml_2.3.12          carData_3.0-5       
+## [56] snakecase_0.11.1     MASS_7.3-60          plyr_1.8.8           pkgbuild_1.4.3       grid_4.1.3          
+## [61] ggrepel_0.9.3        parallel_4.1.3       crayon_1.5.3         lattice_0.21-8       splines_4.1.3       
+## [66] hms_1.1.4            ps_1.7.5             knitr_1.45           pillar_1.11.1        ggpubr_1.0.0        
+## [71] estimability_1.5.1   ggsignif_0.6.4       reshape2_1.4.4       codetools_0.2-20     stats4_4.1.3        
+## [76] rstantools_2.7.0     glue_1.6.2           evaluate_1.0.5       RcppParallel_5.1.7   vctrs_0.7.3         
+## [81] tzdb_0.3.0           gtable_0.3.6         monochromeR_0.2.0    cachem_1.0.8         xfun_0.39           
+## [86] janitor_2.2.0        xtable_1.8-8         coda_0.19-4.1        rstatix_1.1.0        warp_0.2.0          
+## [91] timechange_0.2.0     cmdstanr_0.9.0       TH.data_1.1-2        bridgesampling_1.2-1
 ```
-
-<img src="../Figures/markdown/unnamed-chunk-12-1.png" style="display: block; margin: auto;" />
-
-When we use the observed mean, but increase the temperature variability
-(), mortality decreases.
-
-``` r
-sim_week_var <- simulate_temp_week(
-  mean_temp = warmest_week_summary$mean_temp_week,
-  daily_range = warmest_week_summary$mean_daily_range + 12
-)
-
-var_dyn_tl = dynamic.landscape(sim_week_var$temp_c, oh_tl)
-```
-
-<img src="../Figures/markdown/unnamed-chunk-13-1.png" style="display: block; margin: auto;" />
-
-The plot below overlays the temperature and survival data to highlight
-the alignment between peak temperatures and drops in survival.
-
-``` r
-
-dyn_df = data.frame("time" = var_dyn_tl$time, 
-           "temp" = var_dyn_tl$ta, 
-           "surv" = var_dyn_tl$alive)
-
-dyn_df_thin <- dyn_df |>
-  filter(surv != lag(surv, default = -Inf) | row_number() == n())
-
-temp_range <- range(dyn_df$temp)
-surv_range <- range(dyn_df$surv)
-
-surv_range_fixed <- c(0, 100)
-
-scale_surv <- function(x) (x - surv_range_fixed[1]) / diff(surv_range_fixed) * diff(temp_range) + temp_range[1]
-
-unscale_surv <- function(x) (x - temp_range[1]) / diff(temp_range) * diff(surv_range_fixed) + surv_range_fixed[1]
-
-ggplot(dyn_df, aes(x = time)) +
-  geom_line(aes(y = temp, color = "Temperature (°C)"), 
-            linewidth = 1) +
-  geom_line(data = dyn_df_thin, 
-            aes(y = scale_surv(surv), color = "Survival (%)"), 
-            linewidth = 2) +
-  scale_y_continuous(
-    name = "Temperature (°C)",
-    sec.axis = sec_axis(~ unscale_surv(.), name = "Survival (%)")
-  ) +
-  scale_color_manual(values = c("Survival (%)" = "steelblue", "Temperature (°C)" = "firebrick")) +
-  labs(x = "Time", color = NULL) + 
-  theme_matt() + 
-  theme(legend.position = "right")
-```
-
-<img src="../Figures/markdown/unnamed-chunk-14-1.png" style="display: block; margin: auto;" />
