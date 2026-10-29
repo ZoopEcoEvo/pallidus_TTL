@@ -124,7 +124,8 @@ surv_data = raw_data |>
     event = as.integer(any(responding == "no")),
     n_obs = n(),
     .groups = "drop"
-  )
+  ) |> 
+  filter(time != 0)
 
 surv_data
 ```

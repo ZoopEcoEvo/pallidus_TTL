@@ -1,6 +1,6 @@
 Thermal Tolerance Landscapes of *Skistodiaptomus pallidus*
 ================
-2026-10-21
+2026-10-29
 
 - [Building the survival dataset](#building-the-survival-dataset)
 - [All data](#all-data)
@@ -70,24 +70,24 @@ surv_data = raw_data |>
     event = as.integer(any(responding == "no")),
     n_obs = n(),
     .groups = "drop"
-  )
+  ) |> 
+  filter(time != 0)
 
 surv_data
-## # A tibble: 140 × 10
-##    source_file experiment_date water_bath_id stopwatch_start_time well_id population read_temp_c  time
-##          <int> <date>          <chr>         <dttm>               <chr>   <chr>            <dbl> <dbl>
-##  1           8 2026-10-09      WB-1          2026-10-09 13:25:09  A1      OPOH              34.4    10
-##  2           8 2026-10-09      WB-1          2026-10-09 13:25:09  A2      OPOH              34.4    15
-##  3           8 2026-10-09      WB-1          2026-10-09 13:25:09  A3      OPOH              34.4     6
-##  4           8 2026-10-09      WB-1          2026-10-09 13:25:09  A4      CPCO              34.4     6
-##  5           8 2026-10-09      WB-1          2026-10-09 13:25:09  A5      OPOH              34.4     3
-##  6           8 2026-10-09      WB-1          2026-10-09 13:25:09  B1      CPCO              34.4    10
-##  7           8 2026-10-09      WB-1          2026-10-09 13:25:09  B2      OPOH              34.4    15
-##  8           8 2026-10-09      WB-1          2026-10-09 13:25:09  B3      OPOH              34.4    30
-##  9           8 2026-10-09      WB-1          2026-10-09 13:25:09  B4      CPCO              34.4    10
-## 10           8 2026-10-09      WB-1          2026-10-09 13:25:09  B5      CPCO              34.4     3
-## # ℹ 130 more rows
-## # ℹ 2 more variables: event <int>, n_obs <int>
+## # A tibble: 218 × 10
+##    source_file experiment_date water_bath_id stopwatch_start_time well_id population read_temp_c  time event n_obs
+##          <int> <date>          <chr>         <dttm>               <chr>   <chr>            <dbl> <dbl> <int> <int>
+##  1           8 2026-10-09      WB-1          2026-10-09 13:25:09  A1      OPOH              34.4    10     1     6
+##  2           8 2026-10-09      WB-1          2026-10-09 13:25:09  A2      OPOH              34.4    15     1     6
+##  3           8 2026-10-09      WB-1          2026-10-09 13:25:09  A3      OPOH              34.4     6     1     6
+##  4           8 2026-10-09      WB-1          2026-10-09 13:25:09  A4      CPCO              34.4     6     1     6
+##  5           8 2026-10-09      WB-1          2026-10-09 13:25:09  A5      OPOH              34.4     3     1     6
+##  6           8 2026-10-09      WB-1          2026-10-09 13:25:09  B1      CPCO              34.4    10     1     6
+##  7           8 2026-10-09      WB-1          2026-10-09 13:25:09  B2      OPOH              34.4    15     1     6
+##  8           8 2026-10-09      WB-1          2026-10-09 13:25:09  B3      OPOH              34.4    30     1     6
+##  9           8 2026-10-09      WB-1          2026-10-09 13:25:09  B4      CPCO              34.4    10     1     6
+## 10           8 2026-10-09      WB-1          2026-10-09 13:25:09  B5      CPCO              34.4     3     1     6
+## # ℹ 208 more rows
 ```
 
 ## All data
@@ -110,9 +110,9 @@ aic_table
 ## # A tibble: 3 × 3
 ##   dist          AIC logLik
 ##   <chr>       <dbl>  <dbl>
-## 1 weibull     1102.  -546.
-## 2 lognormal   1034.  -512.
-## 3 loglogistic 1007.  -499.
+## 1 weibull     1693.  -833.
+## 2 lognormal   1596.  -785.
+## 3 loglogistic 1566.  -770.
 ```
 
 The log-logistic distribution has the lowest AIC. While a likelihood
@@ -128,21 +128,29 @@ full_model_interaction = survreg(Surv(time, event) ~ population * read_temp_c, d
 
 full_model_tidy = tidy(full_model_interaction, conf.int = TRUE)
 full_model_tidy
-## # A tibble: 5 × 7
-##   term                       estimate std.error statistic  p.value conf.low conf.high
-##   <chr>                         <dbl>     <dbl>     <dbl>    <dbl>    <dbl>     <dbl>
-## 1 (Intercept)                  74.9     13.8        5.45  5.13e- 8   48.0      102.  
-## 2 populationOPOH              -12.4     18.5       -0.667 5.05e- 1  -48.7       24.0 
-## 3 read_temp_c                  -2.11     0.398     -5.31  1.11e- 7   -2.89      -1.33
-## 4 populationOPOH:read_temp_c    0.358    0.537      0.667 5.05e- 1   -0.694      1.41
-## 5 Log(scale)                   -0.576    0.0748    -7.70  1.36e-14   NA         NA
+## # A tibble: 13 × 7
+##    term                       estimate std.error statistic  p.value conf.low conf.high
+##    <chr>                         <dbl>     <dbl>     <dbl>    <dbl>    <dbl>     <dbl>
+##  1 (Intercept)                 129.      38.0        3.39  7.08e- 4   54.2      203.  
+##  2 populationCPCO              -52.5     40.7       -1.29  1.98e- 1 -132.        27.3 
+##  3 populationCPCT              -73.7     51.6       -1.43  1.53e- 1 -175.        27.5 
+##  4 populationHPPA             -107.      50.1       -2.13  3.31e- 2 -205.        -8.56
+##  5 populationLLPA               -8.98    54.9       -0.164 8.70e- 1 -117.        98.6 
+##  6 populationOPOH              -66.3     40.2       -1.65  9.96e- 2 -145.        12.6 
+##  7 read_temp_c                  -3.67     1.10      -3.34  8.23e- 4   -5.82      -1.52
+##  8 populationCPCO:read_temp_c    1.52     1.18       1.29  1.96e- 1   -0.784      3.82
+##  9 populationCPCT:read_temp_c    2.12     1.49       1.42  1.55e- 1   -0.801      5.05
+## 10 populationHPPA:read_temp_c    3.09     1.45       2.13  3.28e- 2    0.252      5.93
+## 11 populationLLPA:read_temp_c    0.280    1.58       0.177 8.60e- 1   -2.83       3.39
+## 12 populationOPOH:read_temp_c    1.92     1.16       1.65  9.86e- 2   -0.358      4.20
+## 13 Log(scale)                   -0.509    0.0592    -8.60  7.74e-18   NA         NA
 ```
 
 Each 1°C increase in read temperature is associated with median survival
-time shrinking to about 12% of its prior value (time ratio 0.1209, p
-1.1e-07) — a steep, well-supported decline over the 31-34.8°C range
+time shrinking to about 3% of its prior value (time ratio 0.0254, p
+0.00082) — a steep, well-supported decline over the 31-34.8°C range
 tested. There is no evidence of a difference between populations once
-temperature is accounted for (time ratio 0, p 0.5), and the wide
+temperature is accounted for (time ratio 0, p 0.1), and the wide
 confidence interval on that estimate reflects the modest sample size.
 
 ## Just temperatures above 33°C
@@ -159,21 +167,29 @@ high_temp_model = survreg(Surv(time, event) ~ population * read_temp_c, data = s
 
 high_temp_tidy = tidy(high_temp_model, conf.int = TRUE)
 high_temp_tidy
-## # A tibble: 5 × 7
-##   term                       estimate std.error statistic  p.value conf.low conf.high
-##   <chr>                         <dbl>     <dbl>     <dbl>    <dbl>    <dbl>     <dbl>
-## 1 (Intercept)                  74.9     13.8        5.45  5.13e- 8   48.0      102.  
-## 2 populationOPOH              -12.4     18.5       -0.667 5.05e- 1  -48.7       24.0 
-## 3 read_temp_c                  -2.11     0.398     -5.31  1.11e- 7   -2.89      -1.33
-## 4 populationOPOH:read_temp_c    0.358    0.537      0.667 5.05e- 1   -0.694      1.41
-## 5 Log(scale)                   -0.576    0.0748    -7.70  1.36e-14   NA         NA
+## # A tibble: 13 × 7
+##    term                       estimate std.error statistic  p.value conf.low conf.high
+##    <chr>                         <dbl>     <dbl>     <dbl>    <dbl>    <dbl>     <dbl>
+##  1 (Intercept)                 129.      38.0        3.39  7.08e- 4   54.2      203.  
+##  2 populationCPCO              -52.5     40.7       -1.29  1.98e- 1 -132.        27.3 
+##  3 populationCPCT              -73.7     51.6       -1.43  1.53e- 1 -175.        27.5 
+##  4 populationHPPA             -107.      50.1       -2.13  3.31e- 2 -205.        -8.56
+##  5 populationLLPA               -8.98    54.9       -0.164 8.70e- 1 -117.        98.6 
+##  6 populationOPOH              -66.3     40.2       -1.65  9.96e- 2 -145.        12.6 
+##  7 read_temp_c                  -3.67     1.10      -3.34  8.23e- 4   -5.82      -1.52
+##  8 populationCPCO:read_temp_c    1.52     1.18       1.29  1.96e- 1   -0.784      3.82
+##  9 populationCPCT:read_temp_c    2.12     1.49       1.42  1.55e- 1   -0.801      5.05
+## 10 populationHPPA:read_temp_c    3.09     1.45       2.13  3.28e- 2    0.252      5.93
+## 11 populationLLPA:read_temp_c    0.280    1.58       0.177 8.60e- 1   -2.83       3.39
+## 12 populationOPOH:read_temp_c    1.92     1.16       1.65  9.86e- 2   -0.358      4.20
+## 13 Log(scale)                   -0.509    0.0592    -8.60  7.74e-18   NA         NA
 ```
 
-The interaction term remains non-significant (p 0.5), so there is still
-no evidence that the two populations decline at different rates as
+The interaction term remains non-significant (p 0.099), so there is
+still no evidence that the two populations decline at different rates as
 temperature rises above 33°C — both show a similarly steep drop in
-median survival time (main effect of read temperature: time ratio 0.1209
-per 1°C, p 1.1e-07). The interaction is retained here per the analysis
+median survival time (main effect of read temperature: time ratio 0.0254
+per 1°C, p 0.00082). The interaction is retained here per the analysis
 plan, but given its lack of significance and the small per-cell sample
 sizes, the near-parallel curves in the plot below should be interpreted
 cautiously rather than as confirmed evidence of population-specific
@@ -236,12 +252,16 @@ TTL_params = surv_data_high %>%
 
 TTL_params |> 
   select(population, ctmax_static, z_slope)
-## # A tibble: 2 × 3
-## # Groups:   population [2]
+## # A tibble: 6 × 3
+## # Groups:   population [6]
 ##   population ctmax_static z_slope
 ##   <chr>             <dbl>   <dbl>
-## 1 CPCO               35.4   0.451
-## 2 OPOH               35.7   0.569
+## 1 BRNY               35.1   0.269
+## 2 CPCO               35.4   0.451
+## 3 CPCT               35.5   0.645
+## 4 HPPA               38.1   1.91 
+## 5 LLPA               35.3   0.292
+## 6 OPOH               35.7   0.569
 ```
 
 ## Dynamic Landscapes
